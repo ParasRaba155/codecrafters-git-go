@@ -85,6 +85,6 @@ func readObjectFile(r io.Reader) error {
 		}
 		zeroPos++
 	}
-	ePrintf("%s", content[zeroPos+1:])
+	fmt.Printf("%s", content[zeroPos+1:])
 	return nil
 }
