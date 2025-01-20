@@ -183,7 +183,7 @@ func createContentWithInfo(typ string, content []byte) []byte {
 	contentLength := len(content)
 	contentDigitLength := numOfDigits(contentLength)
 
-	result := make([]byte, 0, len(typ)+contentLength+2+len(content))
+	result := make([]byte, 0, len(typ)+contentLength+1+contentDigitLength+len(content))
 	// append type
 	result = append(result, typ...)
 	// append the space
