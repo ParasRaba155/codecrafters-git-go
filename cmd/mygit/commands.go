@@ -49,10 +49,13 @@ func catFileCmd() {
 		os.Exit(1)
 	}
 	defer file.Close()
-	content, err := readObjectFile(file)
+	content, objectType, err := readObjectFile(file)
 	if err != nil {
 		ePrintf("error in reading the object file: %s", err)
 		os.Exit(1)
+	}
+	if objectType != "blob" {
+		ePrintf("the given hash object is not of type \"blob\" is %q", objectType)
 	}
 	fmt.Printf("%s", content)
 }
@@ -95,4 +98,46 @@ func hashObjectCmd() {
 		os.Exit(1)
 	}
 	fmt.Printf("%s\n", fileSHA)
+}
+
+func lsTreeCmd() {
+	if len(os.Args) != 4 {
+		ePrintf("usage: mygit ls-tree <flag> <file>\n")
+		os.Exit(1)
+	}
+	if os.Args[2] != "--name-only" {
+		ePrintf("usage: mygit cat-file --name-only <tree_sha>\n")
+		os.Exit(1)
+	}
+	objHash := os.Args[3]
+	if len(objHash) != 40 {
+		ePrintf("invalid object hash: %q", objHash)
+		os.Exit(1)
+	}
+	file, err := os.Open(fmt.Sprintf(".git/objects/%s/%s", objHash[0:2], objHash[2:]))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			ePrintf("no such object: %q", objHash)
+			os.Exit(1)
+		}
+		ePrintf("could not open the object file: %v", err)
+		os.Exit(1)
+	}
+	defer file.Close()
+	content, objectType, err := readObjectFile(file)
+	if err != nil {
+		ePrintf("error in reading the object file: %s", err)
+		os.Exit(1)
+	}
+	if objectType != "tree" {
+		ePrintf("fatal: not a tree object: %q", objectType)
+	}
+	tree, err := readATreeObject(content)
+	if err != nil {
+		ePrintf("error in reading the tree object: %s", err)
+		os.Exit(1)
+	}
+	for i := range tree {
+		fmt.Println(tree[i].Name)
+	}
 }

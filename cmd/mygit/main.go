@@ -21,6 +21,8 @@ func main() {
 		catFileCmd()
 	case "hash-object":
 		hashObjectCmd()
+    case "ls-tree":
+        lsTreeCmd()
 	default:
 		ePrintf("Unknown command %s\n", command)
 		os.Exit(1)

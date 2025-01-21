@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
 	"encoding/hex"
@@ -8,18 +9,27 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"strconv"
 )
 
+type GitTree struct {
+	Mode os.FileMode
+	Name string
+	// SHA is the actual SHA of the file without the hex encoding
+	SHA [20]byte
+}
+
 // readObjectFile will return the content after the null character byte
-func readObjectFile(r io.Reader) ([]byte, error) {
+// and the type of the content e.g. the "tree", "blog", etc.
+func readObjectFile(r io.Reader) ([]byte, string, error) {
 	z, err := zlib.NewReader(r)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer z.Close()
 	content, err := io.ReadAll(z)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	zeroPos := 0
 	for _, by := range content {
@@ -28,7 +38,11 @@ func readObjectFile(r io.Reader) ([]byte, error) {
 		}
 		zeroPos++
 	}
-	return content[zeroPos+1:], nil
+	parts := bytes.Split(content[:zeroPos], []byte{' '})
+	if len(parts) != 2 {
+		return nil, "", fmt.Errorf("couldn't find the object type")
+	}
+	return content[zeroPos+1:], string(parts[0]), nil
 }
 
 // createObjectFile writes the content byte to w with zlib compression
@@ -63,6 +77,18 @@ func calculateSHA(content []byte) (string, error) {
 	}
 	sha := hex.EncodeToString(hasher.Sum(nil))
 	return sha, nil
+}
+
+func getRawSHA(sha string) ([]byte, error) {
+	dst := make([]byte, 20)
+	n, err := hex.Decode(dst, []byte(sha))
+	if err != nil {
+		return nil, fmt.Errorf("couldn't decode into hex: %w", err)
+	}
+	if n != len(dst) {
+		return nil, fmt.Errorf("couldn't decode fully with decoded byte: %d and total byte: %d", n, len(dst))
+	}
+	return dst, nil
 }
 
 // createEmptyObjectFile will crete sha[0:2],sha[2:40]
@@ -104,4 +130,40 @@ func numOfDigits(a int) int {
 		count++
 	}
 	return count
+}
+
+// readATreeObject unmarshal the byte array into GitTree object
+// it is expected that the header would already been stripped from the content
+// and we are indeed only getting the body of the tree object
+func readATreeObject(content []byte) ([]GitTree, error) {
+	// a tree object is of the form
+	//// tree <size>\0
+	//// <mode> <name>\0<20_byte_sha>
+	//// <mode> <name>\0<20_byte_sha>
+	result := []GitTree{}
+
+	beforeSpace := 0
+	beforeName := 0
+	for i := range content {
+		curr := GitTree{}
+		if content[i] == ' ' {
+			fileMode := content[beforeSpace:i]
+			mode, err := strconv.Atoi(string(fileMode))
+			if err != nil {
+				return nil, err
+			}
+			curr.Mode = fs.FileMode(mode)
+			beforeName = i + 1
+		}
+		if content[i] == 0 {
+			name := content[beforeName:i]
+			sha := content[i+1 : i+1+20]
+			curr.Name = string(name)
+			curr.SHA = [20]byte(sha)
+			beforeSpace = i + 21
+			result = append(result, curr)
+			continue
+		}
+	}
+	return result, nil
 }
