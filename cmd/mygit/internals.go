@@ -144,7 +144,7 @@ func readATreeObject(content []byte) ([]GitTree, error) {
 
 	beforeSpace := 0
 	beforeName := 0
-	for i := range content {
+	for i := 0; i < len(content); i++ {
 		curr := GitTree{}
 		if content[i] == ' ' {
 			fileMode := content[beforeSpace:i]
@@ -156,13 +156,25 @@ func readATreeObject(content []byte) ([]GitTree, error) {
 			beforeName = i + 1
 		}
 		if content[i] == 0 {
+			// Extract name
 			name := content[beforeName:i]
-			sha := content[i+1 : i+1+20]
+
+			// Ensure there are at least 20 bytes for the SHA
+			if i+1+20 > len(content) {
+				return nil, fmt.Errorf("unexpected end of content while reading SHA")
+			}
+
+			// Extract and copy the SHA
+			var sha [20]byte
+			copy(sha[:], content[i+1:i+1+20])
+
 			curr.Name = string(name)
-			curr.SHA = [20]byte(sha)
+			curr.SHA = sha
+
+			// Move to the next entry
 			beforeSpace = i + 21
+			i += 20 // Skip over the SHA bytes
 			result = append(result, curr)
-			continue
 		}
 	}
 	return result, nil
