@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -34,20 +33,7 @@ func catFileCmd() {
 		ePrintf("usage: mygit cat-file -p <file>\n")
 		os.Exit(1)
 	}
-	objHash := os.Args[3]
-	if len(objHash) != 40 {
-		ePrintf("invalid object hash: %q", objHash)
-		os.Exit(1)
-	}
-	file, err := os.Open(fmt.Sprintf(".git/objects/%s/%s", objHash[0:2], objHash[2:]))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			ePrintf("no such object: %q", objHash)
-			os.Exit(1)
-		}
-		ePrintf("could not open the object file: %v", err)
-		os.Exit(1)
-	}
+	file := getFileFromHash(os.Args[3])
 	defer file.Close()
 	content, objectType, err := readObjectFile(file)
 	if err != nil {
@@ -109,20 +95,7 @@ func lsTreeCmd() {
 		ePrintf("usage: mygit cat-file --name-only <tree_sha>\n")
 		os.Exit(1)
 	}
-	objHash := os.Args[3]
-	if len(objHash) != 40 {
-		ePrintf("invalid object hash: %q", objHash)
-		os.Exit(1)
-	}
-	file, err := os.Open(fmt.Sprintf(".git/objects/%s/%s", objHash[0:2], objHash[2:]))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			ePrintf("no such object: %q", objHash)
-			os.Exit(1)
-		}
-		ePrintf("could not open the object file: %v", err)
-		os.Exit(1)
-	}
+	file := getFileFromHash(os.Args[3])
 	defer file.Close()
 	content, objectType, err := readObjectFile(file)
 	if err != nil {
