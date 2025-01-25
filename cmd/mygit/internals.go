@@ -12,6 +12,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"time"
+)
+
+const (
+	defaultName    = "TestUser"
+	defaultEmailID = "testuser@example.com"
 )
 
 type GitTree struct {
@@ -95,7 +101,11 @@ func createObjectFile(w io.Writer, content io.Reader) error {
 		return fmt.Errorf("createObjectFile file could not write the content: %s", err)
 	}
 	if n != len(contentByte) {
-		return fmt.Errorf("createObjectFile content length and written bytes do not match %d and %d", len(contentByte), n)
+		return fmt.Errorf(
+			"createObjectFile content length and written bytes do not match %d and %d",
+			len(contentByte),
+			n,
+		)
 	}
 	return nil
 }
@@ -118,7 +128,11 @@ func getRawSHA(content []byte) ([20]byte, error) {
 		return [20]byte{}, err
 	}
 	if n != len(content) {
-		return [20]byte{}, fmt.Errorf("mismatch in the bytes written and content: %d and %d", n, len(content))
+		return [20]byte{}, fmt.Errorf(
+			"mismatch in the bytes written and content: %d and %d",
+			n,
+			len(content),
+		)
 	}
 	res := hasher.Sum(nil)
 	if len(res) != 20 {
@@ -315,4 +329,77 @@ func bufferToFile(buffer *bytes.Buffer) ([20]byte, error) {
 		return [20]byte{}, err
 	}
 	return treeRawSHA, nil
+}
+
+func writeCommitFile(treeSHA, commitMsg string, parentSHA ...string) ([]byte, error) {
+	rawTreeSHA := [20]byte{}
+	parentsSHA := make([][20]byte, len(parentSHA))
+	n, err := hex.Decode(rawTreeSHA[:], []byte(treeSHA))
+	if n != 20 || err != nil {
+		return nil, fmt.Errorf("decode treeSHA %d decoded: %s", n, err)
+	}
+	for i := range parentSHA {
+		n, err := hex.Decode(parentsSHA[i][:], []byte(parentSHA[i]))
+		if n != 20 || err != nil {
+			return nil, fmt.Errorf("decode parentSHA %d decoded: %s", n, err)
+		}
+	}
+	var buffer bytes.Buffer
+	_, err = buffer.WriteString("tree ")
+	if err != nil {
+		return nil, fmt.Errorf("write tree: %w", err)
+	}
+	_, err = buffer.Write(rawTreeSHA[:])
+	if err != nil {
+		return nil, fmt.Errorf("write tree sha: %w", err)
+	}
+	for i := range parentsSHA {
+		_, err = buffer.WriteString("parent ")
+		if err != nil {
+			return nil, fmt.Errorf("write parent: %w", err)
+		}
+		_, err = buffer.Write(parentsSHA[i][:])
+		if err != nil {
+			return nil, fmt.Errorf("write parent sha: %w", err)
+		}
+	}
+	now := time.Now()
+	_, err = buffer.WriteString(getAuthorCommiterString("author", now))
+	if err != nil {
+		return nil, fmt.Errorf("write author: %w", err)
+	}
+	_, err = buffer.WriteString(getAuthorCommiterString("committer", now))
+	if err != nil {
+		return nil, fmt.Errorf("write committer: %w", err)
+	}
+	err = buffer.WriteByte('\n')
+	if err != nil {
+		return nil, fmt.Errorf("write new line: %w", err)
+	}
+	_, err = buffer.WriteString(commitMsg)
+	if err != nil {
+		return nil, fmt.Errorf("write commitMsg: %w", err)
+	}
+	return buffer.Bytes(), nil
+}
+
+func getAuthorCommiterString(role string, time time.Time) string {
+	timeUnix := time.Unix()
+	_, offset := time.Zone()
+	offsetHours := offset / 3600
+	offsetMinutes := (offset % 3600) / 60
+	tzSign := "+"
+	if offset < 0 {
+		tzSign = "-"
+	}
+	return fmt.Sprintf(
+		"%s %s <%s> %d %s%02d%02d",
+		role,
+		defaultName,
+		defaultEmailID,
+		timeUnix,
+		tzSign,
+		offsetHours,
+		offsetMinutes,
+	)
 }

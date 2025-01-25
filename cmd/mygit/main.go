@@ -25,6 +25,8 @@ func main() {
 		lsTreeCmd()
 	case "write-tree":
 		writeTreeCmd()
+	case "commit-tree":
+		commitTreeCmd()
 	default:
 		ePrintf("Unknown command %s\n", command)
 		os.Exit(1)

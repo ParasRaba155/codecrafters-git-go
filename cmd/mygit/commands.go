@@ -128,3 +128,45 @@ func writeTreeCmd() {
 	}
 	fmt.Println(hex.EncodeToString(treeSHA[:]))
 }
+
+func commitTreeCmd() {
+	if len(os.Args) != 7 {
+		ePrintf("usage: mygit commit-tree <tree-sha> -p <commit-sha> -m <msg>\n")
+		os.Exit(1)
+	}
+	if os.Args[3] != "-p" || os.Args[5] != "-m" {
+		ePrintf("usage: mygit commit-tree <tree-sha> -p <commit-sha> -m <msg>\n")
+		os.Exit(1)
+	}
+	treeSHA, commitSHA := os.Args[2], os.Args[4]
+	if len(treeSHA) != 40 {
+		ePrintf("invalid treeSHA\n")
+		os.Exit(1)
+	}
+	if len(commitSHA) != 40 {
+		ePrintf("invalid commitSHA\n")
+		os.Exit(1)
+	}
+	commitMsg := os.Args[6]
+	content, err := writeCommitFile(treeSHA, commitMsg, commitSHA)
+	if err != nil {
+		ePrintf("write commit file: %s", err)
+		os.Exit(1)
+	}
+	nFile, err := createEmptyObjectFile(commitSHA)
+	if err != nil {
+		ePrintf("error in creating the object file: %s", err)
+		os.Exit(1)
+	}
+	err = createObjectFile(nFile, bytes.NewReader(content))
+	if err != nil {
+		ePrintf("error in writing to the object file: %s", err)
+		os.Exit(1)
+	}
+	content, _, err = readObjectFile(nFile)
+	if err != nil {
+		ePrintf("error in reading the object file: %s", err)
+		os.Exit(1)
+	}
+	fmt.Printf("%s", content)
+}
