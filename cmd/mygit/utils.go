@@ -2,9 +2,30 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
+
+// errWriter is the helper func for writing
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+// write method calls the internal write method of the w
+// it does not write if there is some previous error in the ew
+func (ew *errWriter) write(buf []byte) {
+	if ew.err != nil {
+		return
+	}
+	n, err := ew.w.Write(buf)
+	if len(buf) != n {
+		ew.err = fmt.Errorf("to be written: %d, wrote %d", len(buf), n)
+	}
+	ew.err = err
+}
 
 func getFileFromHash(objHash string) *os.File {
 	if len(objHash) != 40 {

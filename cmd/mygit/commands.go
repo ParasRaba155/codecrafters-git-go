@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -49,11 +50,11 @@ func catFileCmd() {
 // hashObjectCmd has the logic for the hash-object subcommand
 func hashObjectCmd() {
 	if len(os.Args) != 4 {
-		ePrintf("usage: mygit cat-file <flag> <file>\n")
+		ePrintf("usage: mygit hash-object <flag> <file>\n")
 		os.Exit(1)
 	}
 	if os.Args[2] != "-w" {
-		ePrintf("usage: mygit cat-file -p <file>\n")
+		ePrintf("usage: mygit hash-object -w <file>\n")
 		os.Exit(1)
 	}
 	file, err := os.Open(os.Args[3])
@@ -113,4 +114,17 @@ func lsTreeCmd() {
 	for i := range tree {
 		fmt.Println(tree[i].Name)
 	}
+}
+
+func writeTreeCmd() {
+	if len(os.Args) != 2 {
+		ePrintf("usage: mygit write-tree\n")
+		os.Exit(1)
+	}
+	treeSHA, err := writeTree(".")
+	if err != nil {
+		ePrintf("error in writing tree: %s", err)
+		os.Exit(1)
+	}
+	fmt.Println(hex.EncodeToString(treeSHA[:]))
 }

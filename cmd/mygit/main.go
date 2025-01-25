@@ -23,6 +23,8 @@ func main() {
 		hashObjectCmd()
 	case "ls-tree":
 		lsTreeCmd()
+	case "write-tree":
+		writeTreeCmd()
 	default:
 		ePrintf("Unknown command %s\n", command)
 		os.Exit(1)
