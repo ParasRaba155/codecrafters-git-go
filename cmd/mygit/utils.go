@@ -27,7 +27,10 @@ func (ew *errWriter) write(buf []byte) {
 	ew.err = err
 }
 
-func getFileFromHash(objHash string) *os.File {
+// GetFileFromHash splits the hash into git object format
+//
+// e.g. "23abcdefgh...." -> ./git/objects/23/<remaniing_28_chars>
+func GetFileFromHash(objHash string) *os.File {
 	if len(objHash) != 40 {
 		ePrintf("invalid object hash: %q", objHash)
 		os.Exit(1)

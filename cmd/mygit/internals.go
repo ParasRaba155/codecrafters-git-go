@@ -60,9 +60,9 @@ func (t GitTrees) WriteTo(w io.Writer) (int64, error) {
 	return n, nil
 }
 
-// readObjectFile will return the content after the null character byte
+// ReadObjectFile will return the content after the null character byte
 // and the type of the content e.g. the "tree", "blog", etc.
-func readObjectFile(r io.Reader) ([]byte, string, error) {
+func ReadObjectFile(r io.Reader) ([]byte, string, error) {
 	z, err := zlib.NewReader(r)
 	if err != nil {
 		return nil, "", err
@@ -86,23 +86,23 @@ func readObjectFile(r io.Reader) ([]byte, string, error) {
 	return content[zeroPos+1:], string(parts[0]), nil
 }
 
-// createObjectFile writes the content byte to w with zlib compression
-func createObjectFile(w io.Writer, content io.Reader) error {
+// WriteCompactContent writes the `content` to `w` with zlib compression
+func WriteCompactContent(w io.Writer, content io.Reader) error {
 	z := zlib.NewWriter(w)
 	defer z.Close()
 
 	contentByte, err := io.ReadAll(content)
 	if err != nil {
-		return fmt.Errorf("createObjectFile file could not read the content: %s", err)
+		return fmt.Errorf("WriteCompactContent file could not read the content: %s", err)
 	}
 
 	n, err := z.Write(contentByte)
 	if err != nil {
-		return fmt.Errorf("createObjectFile file could not write the content: %s", err)
+		return fmt.Errorf("WriteCompactContent file could not write the content: %s", err)
 	}
 	if n != len(contentByte) {
 		return fmt.Errorf(
-			"createObjectFile content length and written bytes do not match %d and %d",
+			"WriteCompactContent content length and written bytes do not match %d and %d",
 			len(contentByte),
 			n,
 		)
@@ -110,8 +110,8 @@ func createObjectFile(w io.Writer, content io.Reader) error {
 	return nil
 }
 
-// calculateSHA will return the sha after hex encoding
-func calculateSHA(content []byte) (string, error) {
+// CalculateSHA will return the sha after hex encoding
+func CalculateSHA(content []byte) (string, error) {
 	hash, err := getRawSHA(content)
 	if err != nil {
 		return "", err
@@ -141,8 +141,8 @@ func getRawSHA(content []byte) ([20]byte, error) {
 	return [20]byte(res), nil
 }
 
-// createEmptyObjectFile will crete sha[0:2],sha[2:40]
-func createEmptyObjectFile(sha string) (*os.File, error) {
+// CreateEmptyObjectFile will crete sha[0:2],sha[2:40]
+func CreateEmptyObjectFile(sha string) (*os.File, error) {
 	if len(sha) != 40 {
 		return nil, fmt.Errorf("invalid length of sha object: %d", len(sha))
 	}
@@ -154,8 +154,24 @@ func createEmptyObjectFile(sha string) (*os.File, error) {
 	return os.Create(fmt.Sprintf("./.git/objects/%s/%s", dir, rest))
 }
 
-// createContentWithInfo
-func createContentWithInfo(typ string, content []byte) []byte {
+// FormatGitObjectContent constructs content in Git object storage format.
+//
+// The Git object storage format consists of the following structure:
+//
+//	<type> <content_length><null_byte><content>
+//
+// where:
+// - <type> is a string representing the type of the object (e.g., "blob", "tree").
+// - <content_length> is the size of the content in bytes.
+// - <null_byte> is a null byte (`\0`) separating the metadata from the content.
+// - <content> is the actual data of the object.
+//
+// Example:
+//
+//	content := []byte("hello world")
+//	formattedContent := CreateContentWithInfo("blob", content)
+//	fmt.Printf("%s\n", formattedContent)
+func FormatGitObjectContent(typ string, content []byte) []byte {
 	contentLength := len(content)
 	contentDigitLength := numOfDigits(contentLength)
 
@@ -182,10 +198,10 @@ func numOfDigits(a int) int {
 	return count
 }
 
-// readATreeObject unmarshal the byte array into GitTree object
+// ParseTreeObjectBody unmarshal the byte array into GitTree object
 // it is expected that the header would already been stripped from the content
 // and we are indeed only getting the body of the tree object
-func readATreeObject(content []byte) ([]GitTree, error) {
+func ParseTreeObjectBody(content []byte) ([]GitTree, error) {
 	// a tree object is of the form
 	//// tree <size>\0
 	//// <mode> <name>\0<20_byte_sha>
@@ -230,7 +246,28 @@ func readATreeObject(content []byte) ([]GitTree, error) {
 	return result, nil
 }
 
-func writeTree(dirPath string) ([20]byte, error) {
+// WriteTree generates a Git-like tree object for the specified directory and its contents.
+//
+// It recursively traverses the directory structure starting from `dirPath`, processing
+// files and subdirectories to create entries for a Git tree object. The function serializes
+// the tree into the Git object format and returns the SHA-1 hash of the tree object.
+//
+// Files and directories are processed as follows:
+// - Files are read and their SHA-1 hashes are calculated based on their content.
+// - Directories (other than `.git`) are recursively processed into sub-tree objects.
+// - The `.git` directory is ignored during traversal.
+//
+// The function returns a 20-byte SHA-1 hash of the resulting tree object and an error if
+// any issues occur during processing.
+//
+// Example:
+//
+//	sha, err := WriteTree("/path/to/repo")
+//	if err != nil {
+//		log.Fatalf("failed to write tree: %v", err)
+//	}
+//	fmt.Printf("Tree SHA: %x\n", sha)
+func WriteTree(dirPath string) ([20]byte, error) {
 	var buffer bytes.Buffer
 	entries := []GitTree{}
 
@@ -249,7 +286,7 @@ func writeTree(dirPath string) ([20]byte, error) {
 				return nil
 			}
 			// Process subdirectories
-			subTreeSHA, err := writeTree(path)
+			subTreeSHA, err := WriteTree(path)
 			if err != nil {
 				return err
 			}
@@ -275,7 +312,7 @@ func writeTree(dirPath string) ([20]byte, error) {
 			return fmt.Errorf("read file %s: %w", path, err)
 		}
 
-		fullContent := createContentWithInfo("blob", fileContent)
+		fullContent := FormatGitObjectContent("blob", fileContent)
 		rawSHA, err := getRawSHA(fullContent)
 		if err != nil {
 			return fmt.Errorf("calculate file SHA for %s: %w", path, err)
@@ -310,12 +347,12 @@ func writeTree(dirPath string) ([20]byte, error) {
 func bufferToFile(buffer *bytes.Buffer) ([20]byte, error) {
 	// Compute the tree's SHA and write it to the object directory
 	treeContent := buffer.Bytes()
-	treeRawSHA, err := getRawSHA(createContentWithInfo("tree", treeContent))
+	treeRawSHA, err := getRawSHA(FormatGitObjectContent("tree", treeContent))
 	if err != nil {
 		return [20]byte{}, err
 	}
 	treeSHA := hex.EncodeToString(treeRawSHA[:])
-	treeFile, err := createEmptyObjectFile(treeSHA)
+	treeFile, err := CreateEmptyObjectFile(treeSHA)
 	if err != nil {
 		// the tree has been created and return the sha
 		if os.IsExist(err) {
@@ -324,14 +361,15 @@ func bufferToFile(buffer *bytes.Buffer) ([20]byte, error) {
 		return [20]byte{}, fmt.Errorf("couldn't create tree object file: %w", err)
 	}
 	defer treeFile.Close()
-	err = createObjectFile(treeFile, bytes.NewReader(createContentWithInfo("tree", treeContent)))
+	err = WriteCompactContent(treeFile, bytes.NewReader(FormatGitObjectContent("tree", treeContent)))
 	if err != nil {
 		return [20]byte{}, err
 	}
 	return treeRawSHA, nil
 }
 
-func writeCommitContent(treeSHA, commitMsg string, parentSHA ...string) ([]byte, error) {
+// WriteCommitContent writes the content in the expected commit object form
+func WriteCommitContent(treeSHA, commitMsg string, parentSHA ...string) ([]byte, error) {
 	var buffer bytes.Buffer
 	_, err := buffer.WriteString(fmt.Sprintf("tree %s\n", treeSHA))
 	if err != nil {

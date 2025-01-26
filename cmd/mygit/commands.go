@@ -34,9 +34,9 @@ func catFileCmd() {
 		ePrintf("usage: mygit cat-file -p <file>\n")
 		os.Exit(1)
 	}
-	file := getFileFromHash(os.Args[3])
+	file := GetFileFromHash(os.Args[3])
 	defer file.Close()
-	content, objectType, err := readObjectFile(file)
+	content, objectType, err := ReadObjectFile(file)
 	if err != nil {
 		ePrintf("error in reading the object file: %s", err)
 		os.Exit(1)
@@ -68,18 +68,18 @@ func hashObjectCmd() {
 		ePrintf("error in reading the given file: %s", err)
 		os.Exit(1)
 	}
-	contentToWrite := createContentWithInfo("blob", fileContent)
-	fileSHA, err := calculateSHA(contentToWrite)
+	contentToWrite := FormatGitObjectContent("blob", fileContent)
+	fileSHA, err := CalculateSHA(contentToWrite)
 	if err != nil {
 		ePrintf("error in calculating the SHA: %s", err)
 		os.Exit(1)
 	}
-	nFile, err := createEmptyObjectFile(fileSHA)
+	nFile, err := CreateEmptyObjectFile(fileSHA)
 	if err != nil {
 		ePrintf("error in creating the object file: %s", err)
 		os.Exit(1)
 	}
-	err = createObjectFile(nFile, bytes.NewReader(contentToWrite))
+	err = WriteCompactContent(nFile, bytes.NewReader(contentToWrite))
 	if err != nil {
 		ePrintf("error in writing to the object file: %s", err)
 		os.Exit(1)
@@ -96,9 +96,9 @@ func lsTreeCmd() {
 		ePrintf("usage: mygit cat-file --name-only <tree_sha>\n")
 		os.Exit(1)
 	}
-	file := getFileFromHash(os.Args[3])
+	file := GetFileFromHash(os.Args[3])
 	defer file.Close()
-	content, objectType, err := readObjectFile(file)
+	content, objectType, err := ReadObjectFile(file)
 	if err != nil {
 		ePrintf("error in reading the object file: %s", err)
 		os.Exit(1)
@@ -106,7 +106,7 @@ func lsTreeCmd() {
 	if objectType != "tree" {
 		ePrintf("fatal: not a tree object: %q", objectType)
 	}
-	tree, err := readATreeObject(content)
+	tree, err := ParseTreeObjectBody(content)
 	if err != nil {
 		ePrintf("error in reading the tree object: %s", err)
 		os.Exit(1)
@@ -121,7 +121,7 @@ func writeTreeCmd() {
 		ePrintf("usage: mygit write-tree\n")
 		os.Exit(1)
 	}
-	treeSHA, err := writeTree(".")
+	treeSHA, err := WriteTree(".")
 	if err != nil {
 		ePrintf("error in writing tree: %s", err)
 		os.Exit(1)
@@ -148,23 +148,23 @@ func commitTreeCmd() {
 		os.Exit(1)
 	}
 	commitMsg := os.Args[6]
-	content, err := writeCommitContent(treeSHA, commitMsg, commitSHA)
+	content, err := WriteCommitContent(treeSHA, commitMsg, commitSHA)
 	if err != nil {
 		ePrintf("write commit file: %s", err)
 		os.Exit(1)
 	}
-	fullContent := createContentWithInfo("commit", content)
-	fullContentSHA, err := calculateSHA(fullContent)
+	fullContent := FormatGitObjectContent("commit", content)
+	fullContentSHA, err := CalculateSHA(fullContent)
 	if err != nil {
 		ePrintf("calculate full content sha: %s", err)
 		os.Exit(1)
 	}
-	file, err := createEmptyObjectFile(fullContentSHA)
+	file, err := CreateEmptyObjectFile(fullContentSHA)
 	if err != nil {
 		ePrintf("create empty object file: %s", err)
 		os.Exit(1)
 	}
-	err = createObjectFile(file, bytes.NewReader(fullContent))
+	err = WriteCompactContent(file, bytes.NewReader(fullContent))
 	if err != nil {
 		ePrintf("write object file: %s", err)
 		os.Exit(1)
