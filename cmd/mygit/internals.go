@@ -148,7 +148,7 @@ func createEmptyObjectFile(sha string) (*os.File, error) {
 	}
 	dir, rest := sha[0:2], sha[2:]
 	err := os.Mkdir(fmt.Sprintf("./.git/objects/%s", dir), fs.FileMode(os.ModeDir))
-	if err != nil {
+	if err != nil && !os.IsExist(err) {
 		return nil, err
 	}
 	return os.Create(fmt.Sprintf("./.git/objects/%s/%s", dir, rest))
@@ -331,36 +331,16 @@ func bufferToFile(buffer *bytes.Buffer) ([20]byte, error) {
 	return treeRawSHA, nil
 }
 
-func writeCommitFile(treeSHA, commitMsg string, parentSHA ...string) ([]byte, error) {
-	rawTreeSHA := [20]byte{}
-	parentsSHA := make([][20]byte, len(parentSHA))
-	n, err := hex.Decode(rawTreeSHA[:], []byte(treeSHA))
-	if n != 20 || err != nil {
-		return nil, fmt.Errorf("decode treeSHA %d decoded: %s", n, err)
-	}
-	for i := range parentSHA {
-		n, err := hex.Decode(parentsSHA[i][:], []byte(parentSHA[i]))
-		if n != 20 || err != nil {
-			return nil, fmt.Errorf("decode parentSHA %d decoded: %s", n, err)
-		}
-	}
+func writeCommitContent(treeSHA, commitMsg string, parentSHA ...string) ([]byte, error) {
 	var buffer bytes.Buffer
-	_, err = buffer.WriteString("tree ")
+	_, err := buffer.WriteString(fmt.Sprintf("tree %s\n", treeSHA))
 	if err != nil {
 		return nil, fmt.Errorf("write tree: %w", err)
 	}
-	_, err = buffer.Write(rawTreeSHA[:])
-	if err != nil {
-		return nil, fmt.Errorf("write tree sha: %w", err)
-	}
-	for i := range parentsSHA {
-		_, err = buffer.WriteString("parent ")
+	for i := range parentSHA {
+		_, err = buffer.WriteString(fmt.Sprintf("parent %s\n", parentSHA[i]))
 		if err != nil {
 			return nil, fmt.Errorf("write parent: %w", err)
-		}
-		_, err = buffer.Write(parentsSHA[i][:])
-		if err != nil {
-			return nil, fmt.Errorf("write parent sha: %w", err)
 		}
 	}
 	now := time.Now()
@@ -376,7 +356,7 @@ func writeCommitFile(treeSHA, commitMsg string, parentSHA ...string) ([]byte, er
 	if err != nil {
 		return nil, fmt.Errorf("write new line: %w", err)
 	}
-	_, err = buffer.WriteString(commitMsg)
+	_, err = buffer.WriteString(commitMsg + "\n")
 	if err != nil {
 		return nil, fmt.Errorf("write commitMsg: %w", err)
 	}
@@ -393,7 +373,7 @@ func getAuthorCommiterString(role string, time time.Time) string {
 		tzSign = "-"
 	}
 	return fmt.Sprintf(
-		"%s %s <%s> %d %s%02d%02d",
+		"%s %s <%s> %d %s%02d%02d\n",
 		role,
 		defaultName,
 		defaultEmailID,

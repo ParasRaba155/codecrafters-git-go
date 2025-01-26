@@ -148,25 +148,26 @@ func commitTreeCmd() {
 		os.Exit(1)
 	}
 	commitMsg := os.Args[6]
-	content, err := writeCommitFile(treeSHA, commitMsg, commitSHA)
+	content, err := writeCommitContent(treeSHA, commitMsg, commitSHA)
 	if err != nil {
 		ePrintf("write commit file: %s", err)
 		os.Exit(1)
 	}
-	nFile, err := createEmptyObjectFile(commitSHA)
+	fullContent := createContentWithInfo("commit", content)
+	fullContentSHA, err := calculateSHA(fullContent)
 	if err != nil {
-		ePrintf("error in creating the object file: %s", err)
+		ePrintf("calculate full content sha: %s", err)
 		os.Exit(1)
 	}
-	err = createObjectFile(nFile, bytes.NewReader(content))
+	file, err := createEmptyObjectFile(fullContentSHA)
 	if err != nil {
-		ePrintf("error in writing to the object file: %s", err)
+		ePrintf("create empty object file: %s", err)
 		os.Exit(1)
 	}
-	content, _, err = readObjectFile(nFile)
+	err = createObjectFile(file, bytes.NewReader(fullContent))
 	if err != nil {
-		ePrintf("error in reading the object file: %s", err)
+		ePrintf("write object file: %s", err)
 		os.Exit(1)
 	}
-	fmt.Printf("%s", content)
+	fmt.Printf("%s", fullContentSHA)
 }
