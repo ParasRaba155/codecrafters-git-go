@@ -27,6 +27,8 @@ func main() {
 		writeTreeCmd()
 	case "commit-tree":
 		commitTreeCmd()
+	case "clone":
+		cloneCmd()
 	default:
 		ePrintf("Unknown command %s\n", command)
 		os.Exit(1)

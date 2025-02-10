@@ -171,3 +171,23 @@ func commitTreeCmd() {
 	}
 	fmt.Printf("%s", fullContentSHA)
 }
+
+func cloneCmd() {
+	if len(os.Args) != 4 {
+		ePrintf("usage: mygit clone <repo_uri> <some_dir>")
+		os.Exit(1)
+	}
+	repoLink, dirtoCloneAt := os.Args[2], os.Args[3]
+	err := os.Mkdir(dirtoCloneAt, os.ModeDir|os.FileMode(0755))
+
+	if err != nil && !os.IsExist(err) {
+		ePrintf("create the dir to clone the repo: %s", err)
+		os.Exit(1)
+	}
+	content, err := getPacketFile(repoLink)
+	if err != nil {
+		ePrintf("get packet file: %s", err)
+		os.Exit(1)
+	}
+	fmt.Printf("%v\n", validatePacketFile(content))
+}
