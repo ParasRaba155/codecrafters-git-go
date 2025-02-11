@@ -189,5 +189,6 @@ func cloneCmd() {
 		ePrintf("get packet file: %s", err)
 		os.Exit(1)
 	}
-	fmt.Printf("%v\n", validatePacketFile(content))
+	fullContent, err := validatePacketFile(content)
+	fmt.Printf("%v %v\n", fullContent, err)
 }

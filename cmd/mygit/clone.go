@@ -14,15 +14,13 @@ import (
 	"time"
 )
 
-// errors
-var (
-	errInvalidPacketLineLength = errors.New("invalid git package length")
-	packetLengthHeaderRegex    = regexp.MustCompile(`^[0-9a-f]{4}#`)
-	objectIDRegex              = regexp.MustCompile(`[0-9a-f]{40}`)
-	client                     = http.Client{
-		Timeout: 5 * time.Second,
-	}
-)
+var errInvalidPacketLineLength = errors.New("invalid packet length")
+
+var objectIDRegex = regexp.MustCompile(`[0-9a-f]{40}`)
+
+var client = http.Client{
+	Timeout: 5 * time.Second,
+}
 
 const (
 	service    = "service"
@@ -31,35 +29,50 @@ const (
 	refName    = "HEAD"
 )
 
+type PacketLine struct {
+	Content       []byte
+	Size          int
+	IsFlushPacket bool
+}
+
 // readPktLine returns the content after checking it's size, it return the size of the content
 // It strips the first size 4 bytes of the result size, so the caller knows how much bytes it needs to read
 // It checks for the special "0000" FLUSH-PACKET
-func readPktLine(line []byte) (content []byte, size int, isFlushPkt bool, err error) {
-	if len(line) <= 4 {
-		return nil, len(line), false, fmt.Errorf("%w: length = %d", errInvalidPacketLineLength, len(line))
+func readPktLine(body io.Reader) (PacketLine, error) {
+	var pktLine PacketLine
+	lengthBuffer := [4]byte{}
+	_, err := io.ReadFull(body, lengthBuffer[:])
+	if err != nil {
+		return pktLine, fmt.Errorf("read packet length: %w", err)
 	}
 
-	pktLength, err := strconv.ParseInt(string(line[:4]), 16, 64)
+	pktLength, err := strconv.ParseInt(string(lengthBuffer[:]), 16, 64)
 	if err != nil {
-		return nil, int(pktLength), false, fmt.Errorf("read packet length: %w", err)
+		return pktLine, fmt.Errorf("read packet length: %w", err)
 	}
+	pktLine.Size = int(pktLength)
 
 	if pktLength == 0 {
-		return nil, 0, true, nil
+		pktLine.IsFlushPacket = true
+		return pktLine, nil
 	}
 
 	if pktLength == 4 {
-		return nil, 0, false, fmt.Errorf("got packet size of 4")
+		return pktLine, fmt.Errorf("%w :packet size 4", errInvalidPacketLineLength)
 	}
 
-	if len(line) != int(pktLength) {
-		return nil, int(pktLength), false, fmt.Errorf("mismatch in expected packet length, want %d got %d", pktLength, len(line))
+	contentBuffer := make([]byte, pktLength-4)
+	_, err = io.ReadFull(body, contentBuffer)
+	if err != nil {
+		return pktLine, fmt.Errorf("read packet content: %w", err)
 	}
+
 	// ignore the line feed char, if it exists
-	if line[len(line)-1] == '\n' {
-		line = line[:len(line)-1]
+	if contentBuffer[len(contentBuffer)-1] == '\n' {
+		contentBuffer = contentBuffer[:len(contentBuffer)-1]
 	}
-	return line[4:], int(pktLength) - 4, false, nil
+	pktLine.Content = contentBuffer
+	return pktLine, nil
 }
 
 // getPacketFile will
@@ -90,18 +103,30 @@ func getPacketFile(repoURL string) (io.ReadCloser, error) {
 	return getResponse.Body, nil
 }
 
-func validatePacketFile(body io.ReadCloser) error {
+func validatePacketFile(body io.ReadCloser) ([]PacketLine, error) {
 	defer func() {
 		if err := body.Close(); err != nil {
 			log.Printf("[ERROR] validatePacketFile close error: %v", err)
 		}
 	}()
 
-	if err := validateHeader(body); err != nil {
-		return err
+	result := []PacketLine{}
+
+	for {
+		pktLine, err := readPktLine(body)
+		if err != nil {
+			if errors.Is(err, io.ErrUnexpectedEOF) {
+				break
+			}
+			return nil, err
+		}
+		result = append(result, pktLine)
+	}
+	if err := validateHeader(result[0]); err != nil {
+		return nil, fmt.Errorf("invalid packet header:%w", err)
 	}
 
-	return body.Close()
+	return result, nil
 }
 
 // validateHeader:
@@ -110,32 +135,9 @@ func validatePacketFile(body io.ReadCloser) error {
 // the LF char at the end of line is optional. We can ignore it in our comparison.
 // The 4 HEXDIGITS is the total length of the header itself including the optional LF char
 // if it's present. The $servicename will be what we requested (e.g. in our case git-upload-pack)
-func validateHeader(body io.Reader) error {
-	buf := make([]byte, 5)
-	_, err := io.ReadAtLeast(body, buf, len(buf))
-	if err != nil {
-		return fmt.Errorf("invalid packet header: %w", err)
-	}
-	if !packetLengthHeaderRegex.Match(buf) {
-		return fmt.Errorf("invalid packet header: %s doesn't match the expected length header", buf)
-	}
-	headerLength, err := strconv.ParseInt(string(buf[:4]), 16, 64)
-	if err != nil {
-		return fmt.Errorf("parse the header length: %w", err)
-	}
-	// we have already read the first 5 bytes of the content, so we will only read the remaining in the line
-	buf = make([]byte, headerLength-5)
-	_, err = io.ReadAtLeast(body, buf, len(buf))
-	if err != nil {
-		return fmt.Errorf("read header: %w", err)
-	}
-
-	// ignore the trailing LF("\n") char
-	if buf[len(buf)-1] == '\n' {
-		buf = buf[:len(buf)-1]
-	}
-	if want := fmt.Sprintf(" %s=%s", service, uploadPack); !bytes.Equal(buf, []byte(want)) {
-		return fmt.Errorf("packet header expectation failed, want: %q got: %q", want, buf)
+func validateHeader(pktLine PacketLine) error {
+	if want := fmt.Sprintf("# %s=%s", service, uploadPack); !bytes.Equal(pktLine.Content, []byte(want)) {
+		return fmt.Errorf("packet header expectation failed, want: %q got: %q", want, pktLine.Content)
 	}
 	return nil
 }
