@@ -16,7 +16,10 @@ import (
 
 var errInvalidPacketLineLength = errors.New("invalid packet length")
 
-var objectIDRegex = regexp.MustCompile(`[0-9a-f]{40}`)
+var (
+	objectIDRegex  = regexp.MustCompile(`[0-9a-f]{40}`)
+	refRecordRegex = regexp.MustCompile(`([a-f0-9]{40})\srefs/(.*)`)
+)
 
 var client = http.Client{
 	Timeout: 5 * time.Second,
@@ -33,6 +36,15 @@ type PacketLine struct {
 	Content       []byte
 	Size          int
 	IsFlushPacket bool
+}
+
+func (l PacketLine) String() string {
+	return fmt.Sprintf("{Content: %q, Size: %d, IsFlushPacket: %t}", l.Content, l.Size, l.IsFlushPacket)
+}
+
+type RefRecord struct {
+	ObjID string
+	Name  string
 }
 
 // readPktLine returns the content after checking it's size, it return the size of the content
@@ -75,7 +87,7 @@ func readPktLine(body io.Reader) (PacketLine, error) {
 	return pktLine, nil
 }
 
-// getPacketFile will
+// getPacketFile
 func getPacketFile(repoURL string) (io.ReadCloser, error) {
 	infoRefsAppendedURL, err := url.JoinPath(repoURL, "/info/refs")
 	if err != nil {
@@ -103,6 +115,7 @@ func getPacketFile(repoURL string) (io.ReadCloser, error) {
 	return getResponse.Body, nil
 }
 
+// validatePacketFile validates the packet headers and body and returns the packet file format
 func validatePacketFile(body io.ReadCloser) ([]PacketLine, error) {
 	defer func() {
 		if err := body.Close(); err != nil {
@@ -115,7 +128,7 @@ func validatePacketFile(body io.ReadCloser) ([]PacketLine, error) {
 	for {
 		pktLine, err := readPktLine(body)
 		if err != nil {
-			if errors.Is(err, io.ErrUnexpectedEOF) {
+			if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 				break
 			}
 			return nil, err
@@ -129,12 +142,46 @@ func validatePacketFile(body io.ReadCloser) ([]PacketLine, error) {
 	return result, nil
 }
 
+// getAllRefs returns the RefRecords reading from the packet lines
+// TODO: add error handling
+func getAllRefs(pktLines []PacketLine) ([]RefRecord, error) {
+	records := make([]RefRecord, 0, len(pktLines)-2)
+	if len(pktLines) <= 2 {
+		log.Printf("[WARN] insufficient number of packet lines: %d", len(pktLines))
+	}
+	// first ref is the default HEAD ref
+	pktLine := pktLines[2]
+	if pktLine.Size < 40 {
+		log.Printf("[WARN] insufficient size of  head packet line: %d", pktLine.Size)
+	}
+	if !bytes.Contains(pktLine.Content, []byte(refName)) {
+		log.Printf("[WARN] required ref name absent: %q", pktLine.Content)
+	}
+	hash := pktLine.Content[:40]
+	if !objectIDRegex.Match(hash) {
+		log.Printf("[WARN] invalid hash: %q", pktLine.Content)
+	}
+	headRef := RefRecord{
+		ObjID: string(hash),
+		Name:  refName,
+	}
+	records = append(records, headRef)
+	for _, pktLine := range pktLines[3 : len(pktLines)-1] {
+		matches := refRecordRegex.FindSubmatch(pktLine.Content)
+		if len(matches) != 3 {
+			log.Printf("failed for pkt line with content: %q", pktLine.Content)
+			continue
+		}
+		records = append(records, RefRecord{
+			ObjID: string(matches[1]),
+			Name:  string(matches[2]),
+		})
+	}
+	return records, nil
+}
+
 // validateHeader:
 // the header is of the format: `4*(HEXDIGITS)# service=$servicename`
-//
-// the LF char at the end of line is optional. We can ignore it in our comparison.
-// The 4 HEXDIGITS is the total length of the header itself including the optional LF char
-// if it's present. The $servicename will be what we requested (e.g. in our case git-upload-pack)
 func validateHeader(pktLine PacketLine) error {
 	if want := fmt.Sprintf("# %s=%s", service, uploadPack); !bytes.Equal(pktLine.Content, []byte(want)) {
 		return fmt.Errorf("packet header expectation failed, want: %q got: %q", want, pktLine.Content)
@@ -169,12 +216,6 @@ func discoverRef(repoURL string, want string, have string) (io.ReadCloser, error
 }
 
 func createRefDiscovery(want string, have string) (io.Reader, error) {
-	if !objectIDRegex.MatchString(want) {
-		return nil, fmt.Errorf("invalid object id in the want: %q", want)
-	}
-	if !objectIDRegex.MatchString(have) {
-		return nil, fmt.Errorf("invalid object id in the have: %q", have)
-	}
 	// the body is of the format
 	// 0032want <obj-id>\n
 	// 0032have <obj-id>\n
@@ -183,13 +224,16 @@ func createRefDiscovery(want string, have string) (io.Reader, error) {
 	// since the length of given packet line for both the want and have will always be 50
 	// and 50 in hex is 0032
 	var b strings.Builder
-	b.WriteString("0032 ")
+	b.WriteString("0032want ")
 	b.WriteString(want)
 	b.WriteByte('\n')
-	b.WriteString("0032 ")
-	b.WriteString(have)
-	b.WriteByte('\n')
+	if have != "" {
+		b.WriteString("0032have ")
+		b.WriteString(have)
+		b.WriteByte('\n')
+	}
 	b.WriteString("0000")
+	b.WriteString("0009done\n")
 
 	return strings.NewReader(b.String()), nil
 }

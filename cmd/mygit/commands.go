@@ -9,186 +9,146 @@ import (
 )
 
 // initCMD has the logic for the init subcommand
-func initCMD() {
+func initCMD() error {
 	for _, dir := range []string{".git", ".git/objects", ".git/refs"} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			ePrintf("Error creating directory: %s\n", err)
+			return fmt.Errorf("creating directory: %w", err)
 		}
 	}
 
 	headFileContents := []byte("ref: refs/heads/main\n")
 	if err := os.WriteFile(".git/HEAD", headFileContents, 0644); err != nil {
-		ePrintf("Error writing file: %s\n", err)
+		return fmt.Errorf("writing file: %w", err)
 	}
 
 	fmt.Println("Initialized git directory")
+	return nil
 }
 
 // catFileCmd has the logic for the cat-file subcommand
-func catFileCmd() {
-	if len(os.Args) != 4 {
-		ePrintf("usage: mygit cat-file <flag> <file>\n")
-		os.Exit(1)
-	}
-	if os.Args[2] != "-p" {
-		ePrintf("usage: mygit cat-file -p <file>\n")
-		os.Exit(1)
-	}
-	file := GetFileFromHash(os.Args[3])
+func catFileCmd(hash string) error {
+	file := GetFileFromHash(hash)
 	defer file.Close()
 	content, objectType, err := ReadObjectFile(file)
 	if err != nil {
-		ePrintf("error in reading the object file: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("error in reading the object file: %s", err)
 	}
 	if objectType != "blob" {
-		ePrintf("the given hash object is not of type \"blob\" is %q", objectType)
+		return fmt.Errorf("the given hash object is not of type \"blob\" is %q", objectType)
 	}
 	fmt.Printf("%s", content)
+	return nil
 }
 
 // hashObjectCmd has the logic for the hash-object subcommand
-func hashObjectCmd() {
-	if len(os.Args) != 4 {
-		ePrintf("usage: mygit hash-object <flag> <file>\n")
-		os.Exit(1)
-	}
-	if os.Args[2] != "-w" {
-		ePrintf("usage: mygit hash-object -w <file>\n")
-		os.Exit(1)
-	}
-	file, err := os.Open(os.Args[3])
+func hashObjectCmd(fileName string) error {
+	file, err := os.Open(fileName)
 	if err != nil {
-		ePrintf("error in opening the given file: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("error in opening the given file: %w", err)
 	}
 	defer file.Close()
 	fileContent, err := io.ReadAll(file)
 	if err != nil {
-		ePrintf("error in reading the given file: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("error in reading the given file: %w", err)
 	}
 	contentToWrite := FormatGitObjectContent("blob", fileContent)
 	fileSHA, err := CalculateSHA(contentToWrite)
 	if err != nil {
-		ePrintf("error in calculating the SHA: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("error in calculating the SHA: %w", err)
 	}
 	nFile, err := CreateEmptyObjectFile(fileSHA)
 	if err != nil {
-		ePrintf("error in creating the object file: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("error in creating the object file: %w", err)
 	}
 	err = WriteCompactContent(nFile, bytes.NewReader(contentToWrite))
 	if err != nil {
-		ePrintf("error in writing to the object file: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("error in writing to the object file: %w", err)
 	}
 	fmt.Printf("%s\n", fileSHA)
+	return nil
 }
 
-func lsTreeCmd() {
-	if len(os.Args) != 4 {
-		ePrintf("usage: mygit ls-tree <flag> <file>\n")
-		os.Exit(1)
-	}
-	if os.Args[2] != "--name-only" {
-		ePrintf("usage: mygit cat-file --name-only <tree_sha>\n")
-		os.Exit(1)
-	}
-	file := GetFileFromHash(os.Args[3])
+func lsTreeCmd(hash string) error {
+	file := GetFileFromHash(hash)
 	defer file.Close()
 	content, objectType, err := ReadObjectFile(file)
 	if err != nil {
-		ePrintf("error in reading the object file: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("error in reading the object file: %w", err)
 	}
 	if objectType != "tree" {
-		ePrintf("fatal: not a tree object: %q", objectType)
+		return fmt.Errorf("fatal: not a tree object: %q", objectType)
 	}
 	tree, err := ParseTreeObjectBody(content)
 	if err != nil {
-		ePrintf("error in reading the tree object: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("error in reading the tree object: %w", err)
 	}
 	for i := range tree {
 		fmt.Println(tree[i].Name)
 	}
+	return nil
 }
 
-func writeTreeCmd() {
-	if len(os.Args) != 2 {
-		ePrintf("usage: mygit write-tree\n")
-		os.Exit(1)
-	}
+func writeTreeCmd() error {
 	treeSHA, err := WriteTree(".")
 	if err != nil {
-		ePrintf("error in writing tree: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("error in writing tree: %w", err)
 	}
 	fmt.Println(hex.EncodeToString(treeSHA[:]))
+	return nil
 }
 
-func commitTreeCmd() {
-	if len(os.Args) != 7 {
-		ePrintf("usage: mygit commit-tree <tree-sha> -p <commit-sha> -m <msg>\n")
-		os.Exit(1)
-	}
-	if os.Args[3] != "-p" || os.Args[5] != "-m" {
-		ePrintf("usage: mygit commit-tree <tree-sha> -p <commit-sha> -m <msg>\n")
-		os.Exit(1)
-	}
-	treeSHA, commitSHA := os.Args[2], os.Args[4]
+func commitTreeCmd(treeSHA, commitSHA, commitMsg string) error {
 	if len(treeSHA) != 40 {
-		ePrintf("invalid treeSHA\n")
-		os.Exit(1)
+		return fmt.Errorf("invalid treeSHA")
 	}
 	if len(commitSHA) != 40 {
-		ePrintf("invalid commitSHA\n")
-		os.Exit(1)
+		return fmt.Errorf("invalid commitSHA")
 	}
-	commitMsg := os.Args[6]
 	content, err := WriteCommitContent(treeSHA, commitMsg, commitSHA)
 	if err != nil {
-		ePrintf("write commit file: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("write commit file: %w", err)
 	}
 	fullContent := FormatGitObjectContent("commit", content)
 	fullContentSHA, err := CalculateSHA(fullContent)
 	if err != nil {
-		ePrintf("calculate full content sha: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("calculate full content sha: %w", err)
 	}
 	file, err := CreateEmptyObjectFile(fullContentSHA)
 	if err != nil {
-		ePrintf("create empty object file: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("create empty object file: %w", err)
 	}
 	err = WriteCompactContent(file, bytes.NewReader(fullContent))
 	if err != nil {
-		ePrintf("write object file: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("write object file: %s", err)
 	}
 	fmt.Printf("%s", fullContentSHA)
+	return nil
 }
 
-func cloneCmd() {
-	if len(os.Args) != 4 {
-		ePrintf("usage: mygit clone <repo_uri> <some_dir>")
-		os.Exit(1)
-	}
-	repoLink, dirtoCloneAt := os.Args[2], os.Args[3]
-	err := os.Mkdir(dirtoCloneAt, os.ModeDir|os.FileMode(0755))
+func cloneCmd(repoLink, dirToCloneAt string) error {
+	err := os.Mkdir(dirToCloneAt, os.ModeDir|os.FileMode(0755))
 
 	if err != nil && !os.IsExist(err) {
-		ePrintf("create the dir to clone the repo: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("create the dir to clone the repo: %w", err)
 	}
 	content, err := getPacketFile(repoLink)
 	if err != nil {
-		ePrintf("get packet file: %s", err)
-		os.Exit(1)
+		return fmt.Errorf("get packet file: %w", err)
 	}
 	fullContent, err := validatePacketFile(content)
-	fmt.Printf("%v %v\n", fullContent, err)
+	if err != nil {
+		return fmt.Errorf("validate packet file: %w", err)
+	}
+	headRef, err := getAllRefs(fullContent)
+	body, err := discoverRef(repoLink, headRef[0].ObjID, "")
+	if err != nil {
+		return fmt.Errorf("discoverRef: %w", err)
+	}
+	defer body.Close()
+	buf, err := io.ReadAll(body)
+	if err != nil {
+		return fmt.Errorf("discoverRef: %w", err)
+	}
+	fmt.Printf("body: %q", buf)
+	return nil
 }
