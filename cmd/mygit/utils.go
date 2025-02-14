@@ -48,3 +48,8 @@ func GetFileFromHash(objHash string) *os.File {
 	}
 	return file
 }
+
+// GetIntFromBigIndian converts to 4 byte Big-Endian to a uint32
+func GetIntFromBigIndian(bytes [4]byte) uint32 {
+	return uint32(bytes[0])<<24 | uint32(bytes[1])<<16 | uint32(bytes[2])<<8 | uint32(bytes[3])<<0
+}

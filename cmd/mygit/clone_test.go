@@ -11,7 +11,7 @@ func Test_ValidatePacketFile(t *testing.T) {
 		t.Fatalf("testdata file open: %s", err)
 	}
 	defer packetFile.Close()
-	_, err = validatePacketFile(packetFile)
+	_, err = ParsePacketFile(packetFile)
 	if err != nil {
 		t.Fatalf("testdata validatePacketFile: %s", err)
 	}
@@ -23,11 +23,11 @@ func Test_ValidateHEAD_Ref(t *testing.T) {
 		t.Fatalf("testdata file open: %s", err)
 	}
 	defer packetFile.Close()
-	pktLines, err := validatePacketFile(packetFile)
+	pktLines, err := ParsePacketFile(packetFile)
 	if err != nil {
 		t.Fatalf("testdata validatePacketFile: %s", err)
 	}
-	refs, err := getAllRefs(pktLines)
+	refs, err := RefRecordsFromPacketLines(pktLines)
 	if err != nil {
 		t.Fatalf("get refs: %s", err)
 	}
@@ -36,5 +36,17 @@ func Test_ValidateHEAD_Ref(t *testing.T) {
 	}
 	if refs[0].Name != "HEAD" {
 		t.Fatalf("HEAD ref not found: %q", refs[0].Name)
+	}
+}
+
+func Test_ValidatePackFile(t *testing.T) {
+	packFile, err := os.Open("../../testdata/pack-response.txt")
+	if err != nil {
+		t.Fatalf("open the pack response: %s", err)
+	}
+	defer packFile.Close()
+	err = ParseDiscoverRefResponse(packFile)
+	if err != nil {
+		t.Fatalf("validate the pack file header: %s", err)
 	}
 }

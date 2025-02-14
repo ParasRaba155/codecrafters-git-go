@@ -131,24 +131,25 @@ func cloneCmd(repoLink, dirToCloneAt string) error {
 	if err != nil && !os.IsExist(err) {
 		return fmt.Errorf("create the dir to clone the repo: %w", err)
 	}
-	content, err := getPacketFile(repoLink)
+	refContent, err := FetchRefs(repoLink)
 	if err != nil {
 		return fmt.Errorf("get packet file: %w", err)
 	}
-	fullContent, err := validatePacketFile(content)
+	refPacketLines, err := ParsePacketFile(refContent)
 	if err != nil {
 		return fmt.Errorf("validate packet file: %w", err)
 	}
-	headRef, err := getAllRefs(fullContent)
-	body, err := discoverRef(repoLink, headRef[0].ObjID, "")
+	refs, err := RefRecordsFromPacketLines(refPacketLines)
+	if err != nil {
+		return fmt.Errorf("get ref records: %w", err)
+	}
+	discoverRefResponse, err := DiscoverRef(repoLink, refs)
 	if err != nil {
 		return fmt.Errorf("discoverRef: %w", err)
 	}
-	defer body.Close()
-	buf, err := io.ReadAll(body)
+	err = ParseDiscoverRefResponse(discoverRefResponse)
 	if err != nil {
-		return fmt.Errorf("discoverRef: %w", err)
+		return fmt.Errorf("parseRefDiscoveryResponse: %w", err)
 	}
-	fmt.Printf("body: %q", buf)
 	return nil
 }

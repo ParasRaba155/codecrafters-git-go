@@ -14,11 +14,17 @@ import (
 	"time"
 )
 
-var errInvalidPacketLineLength = errors.New("invalid packet length")
+var (
+	errInvalidPacketLineLength = errors.New("invalid packet length")
+	errNoWants                 = errors.New("no wants provided in the body")
+)
 
 var (
 	objectIDRegex  = regexp.MustCompile(`[0-9a-f]{40}`)
 	refRecordRegex = regexp.MustCompile(`([a-f0-9]{40})\srefs/(.*)`)
+	ackHeader      = []byte("ACK")
+	nakHeader      = []byte("NAK")
+	pack           = []byte("PACK")
 )
 
 var client = http.Client{
@@ -42,9 +48,25 @@ func (l PacketLine) String() string {
 	return fmt.Sprintf("{Content: %q, Size: %d, IsFlushPacket: %t}", l.Content, l.Size, l.IsFlushPacket)
 }
 
+// validateHeader: checks for given packet line to be a header
+//
+// the header is of the format: `4*(HEXDIGITS)# service=$servicename`
+func (pktLine PacketLine) validateHeader() error {
+	if want := fmt.Sprintf("# %s=%s", service, uploadPack); !bytes.Equal(pktLine.Content, []byte(want)) {
+		return fmt.Errorf("packet header expectation failed, want: %q got: %q", want, pktLine.Content)
+	}
+	return nil
+}
+
 type RefRecord struct {
 	ObjID string
 	Name  string
+}
+
+type CommitRef struct {
+	Head      string
+	Signature string
+	Version   int
 }
 
 // readPktLine returns the content after checking it's size, it return the size of the content
@@ -87,8 +109,8 @@ func readPktLine(body io.Reader) (PacketLine, error) {
 	return pktLine, nil
 }
 
-// getPacketFile
-func getPacketFile(repoURL string) (io.ReadCloser, error) {
+// FetchRefs
+func FetchRefs(repoURL string) (io.ReadCloser, error) {
 	infoRefsAppendedURL, err := url.JoinPath(repoURL, "/info/refs")
 	if err != nil {
 		return nil, fmt.Errorf("join path: %w", err)
@@ -115,8 +137,8 @@ func getPacketFile(repoURL string) (io.ReadCloser, error) {
 	return getResponse.Body, nil
 }
 
-// validatePacketFile validates the packet headers and body and returns the packet file format
-func validatePacketFile(body io.ReadCloser) ([]PacketLine, error) {
+// ParsePacketFile validates the packet headers and body and returns the packet file format
+func ParsePacketFile(body io.ReadCloser) ([]PacketLine, error) {
 	defer func() {
 		if err := body.Close(); err != nil {
 			log.Printf("[ERROR] validatePacketFile close error: %v", err)
@@ -135,16 +157,17 @@ func validatePacketFile(body io.ReadCloser) ([]PacketLine, error) {
 		}
 		result = append(result, pktLine)
 	}
-	if err := validateHeader(result[0]); err != nil {
+	if err := result[0].validateHeader(); err != nil {
 		return nil, fmt.Errorf("invalid packet header:%w", err)
 	}
 
 	return result, nil
 }
 
-// getAllRefs returns the RefRecords reading from the packet lines
+// RefRecordsFromPacketLines returns the RefRecords reading from the packet lines
+//
 // TODO: add error handling
-func getAllRefs(pktLines []PacketLine) ([]RefRecord, error) {
+func RefRecordsFromPacketLines(pktLines []PacketLine) ([]RefRecord, error) {
 	records := make([]RefRecord, 0, len(pktLines)-2)
 	if len(pktLines) <= 2 {
 		log.Printf("[WARN] insufficient number of packet lines: %d", len(pktLines))
@@ -180,23 +203,15 @@ func getAllRefs(pktLines []PacketLine) ([]RefRecord, error) {
 	return records, nil
 }
 
-// validateHeader:
-// the header is of the format: `4*(HEXDIGITS)# service=$servicename`
-func validateHeader(pktLine PacketLine) error {
-	if want := fmt.Sprintf("# %s=%s", service, uploadPack); !bytes.Equal(pktLine.Content, []byte(want)) {
-		return fmt.Errorf("packet header expectation failed, want: %q got: %q", want, pktLine.Content)
-	}
-	return nil
-}
-
-func discoverRef(repoURL string, want string, have string) (io.ReadCloser, error) {
+func DiscoverRef(repoURL string, refs []RefRecord) (io.ReadCloser, error) {
 	url, err := url.JoinPath(repoURL, uploadPack)
 	if err != nil {
 		return nil, fmt.Errorf("join path: %w", err)
 	}
 
+	want := getAllWants(refs)
 	contentType := fmt.Sprintf("application/x-%s-request", uploadPack)
-	requestBody, err := createRefDiscovery(want, have)
+	requestBody, err := createRefDiscoveryRequestBody(want, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +230,12 @@ func discoverRef(repoURL string, want string, have string) (io.ReadCloser, error
 	return postResponse.Body, nil
 }
 
-func createRefDiscovery(want string, have string) (io.Reader, error) {
+// createRefDiscoveryRequestBody creates the required body for ref discovery request
+// if there are no wants it returns errNoWants error
+func createRefDiscoveryRequestBody(want []string, have []string) (io.Reader, error) {
+	if len(want) == 0 {
+		return nil, errNoWants
+	}
 	// the body is of the format
 	// 0032want <obj-id>\n
 	// 0032have <obj-id>\n
@@ -224,16 +244,73 @@ func createRefDiscovery(want string, have string) (io.Reader, error) {
 	// since the length of given packet line for both the want and have will always be 50
 	// and 50 in hex is 0032
 	var b strings.Builder
-	b.WriteString("0032want ")
-	b.WriteString(want)
-	b.WriteByte('\n')
-	if have != "" {
+	for i := range want {
+		b.WriteString("0032want ")
+		b.WriteString(want[i])
+		b.WriteByte('\n')
+	}
+	for i := range have {
 		b.WriteString("0032have ")
-		b.WriteString(have)
+		b.WriteString(have[i])
 		b.WriteByte('\n')
 	}
 	b.WriteString("0000")
 	b.WriteString("0009done\n")
 
 	return strings.NewReader(b.String()), nil
+}
+
+func getAllWants(refs []RefRecord) []string {
+	result := make([]string, len(refs))
+	for i := range refs {
+		result[i] = refs[i].ObjID
+	}
+	return result
+}
+
+func ParseDiscoverRefResponse(body io.ReadCloser) error {
+	defer func() {
+		if err := body.Close(); err != nil {
+			log.Printf("[ERROR] parseRefDiscoveryResponse close error: %v", err)
+		}
+	}()
+	// first we get a packet line with 0008ACK or 0008NAK
+	pkt, err := readPktLine(body)
+	if err != nil {
+		return fmt.Errorf("reading ack packet: %w", err)
+	}
+	if !bytes.Equal(pkt.Content, ackHeader) && !bytes.Equal(pkt.Content, nakHeader) {
+		return fmt.Errorf("packet is neither ACK not NAK: %v", pkt.Content)
+	}
+	_, err = validatePackFileHeader(body)
+	if err != nil {
+		return fmt.Errorf("invalid pack header: %w", err)
+	}
+	return nil
+}
+
+func validatePackFileHeader(body io.Reader) (uint32, error) {
+	packBuf := [4]byte{}
+	_, err := io.ReadFull(body, packBuf[:])
+	if err != nil {
+		return 0, fmt.Errorf("pack header: read PACK: %w", err)
+	}
+	if !bytes.Equal(packBuf[:], pack) {
+		return 0, fmt.Errorf("pack header: did not get pack: %v", packBuf)
+	}
+	versionBuf := [4]byte{}
+	_, err = io.ReadFull(body, versionBuf[:])
+	if err != nil {
+		return 0, fmt.Errorf("pack header: reading version: %w", err)
+	}
+	version := GetIntFromBigIndian(versionBuf)
+	if version != 2 && version != 3 {
+		return 0, fmt.Errorf("pack header: invalid version: %d", version)
+	}
+	numOfObjBuf := [4]byte{}
+	_, err = io.ReadFull(body, numOfObjBuf[:])
+	if err != nil {
+		return 0, fmt.Errorf("pack header: reading number of object: %w", err)
+	}
+	return GetIntFromBigIndian(numOfObjBuf), nil
 }
