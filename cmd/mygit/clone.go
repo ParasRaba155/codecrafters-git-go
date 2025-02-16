@@ -314,3 +314,29 @@ func validatePackFileHeader(body io.Reader) (uint32, error) {
 	}
 	return GetIntFromBigIndian(numOfObjBuf), nil
 }
+
+func readPackFileHeader(r io.Reader) (ObjectType, int, error) {
+	buf := [1]byte{} // we will read the first byte
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
+		return 0, 0, fmt.Errorf("read first byte of pack object: %w", err)
+	}
+	// NOTE: 0x0F: `0b00001111` to extract the lower 4 bits
+	// NOTE 0x07: `0b00000111` to extract the lower 3 bits
+	// NOTE: 0x80: `0b10000000` to extract the MSB (Most Significant Bit)
+	// NOTE: 0x7F: `0b01111111` to extract the last 7 bits
+
+	b := buf[0]
+	size := int(b & 0x0F)
+	objType := (b >> 4) & 0x07
+
+	shift := 4
+	for (b & 0x80) != 0 { // While MSB is set
+		if _, err := io.ReadFull(r, buf[:]); err != nil {
+			return 0, 0, fmt.Errorf("read size bytes: %w", err)
+		}
+		b = buf[0]
+		size |= int(b&0x7F) << shift
+		shift += 7
+	}
+	return validateObjectType(objType), size, nil
+}
