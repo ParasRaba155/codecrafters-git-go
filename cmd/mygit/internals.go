@@ -63,12 +63,7 @@ func (t GitTrees) WriteTo(w io.Writer) (int64, error) {
 // ReadObjectFile will return the content after the null character byte
 // and the type of the content e.g. the "tree", "blog", etc.
 func ReadObjectFile(r io.Reader) ([]byte, string, error) {
-	z, err := zlib.NewReader(r)
-	if err != nil {
-		return nil, "", err
-	}
-	defer z.Close()
-	content, err := io.ReadAll(z)
+	content, err := ReadCompressed(r)
 	if err != nil {
 		return nil, "", err
 	}

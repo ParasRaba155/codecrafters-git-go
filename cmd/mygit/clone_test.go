@@ -97,7 +97,7 @@ func Test_ReadPackFileHeader(t *testing.T) {
 	for i := range testCases {
 		t.Run(fmt.Sprintf("test case: %d", i), func(t *testing.T) {
 			reader := bytes.NewReader(testCases[i].input)
-			objType, size, err := readPackFileHeader(reader)
+			objType, size, err := readPackObjectSize(reader)
 			if err != nil {
 				t.Errorf("did not expected error, got: %s", err)
 			}

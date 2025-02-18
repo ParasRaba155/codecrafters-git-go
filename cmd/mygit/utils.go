@@ -1,9 +1,11 @@
 package main
 
 import (
+	"compress/zlib"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -52,4 +54,23 @@ func GetFileFromHash(objHash string) *os.File {
 // GetIntFromBigIndian converts to 4 byte Big-Endian to a uint32
 func GetIntFromBigIndian(bytes [4]byte) uint32 {
 	return uint32(bytes[0])<<24 | uint32(bytes[1])<<16 | uint32(bytes[2])<<8 | uint32(bytes[3])<<0
+}
+
+// ReadCompressed reads the whole reader using zlib decompress
+func ReadCompressed(r io.Reader) ([]byte, error) {
+	zlibReader, err := zlib.NewReader(r)
+	if err != nil {
+		return nil, fmt.Errorf("read compressed: create zlib reader: %w", err)
+	}
+	defer func() {
+		err := zlibReader.Close()
+		if err != nil {
+			log.Printf("[WARN] ReadCompressed  zlib reader closing: %v", err)
+		}
+	}()
+	decompressedContent, err := io.ReadAll(zlibReader)
+	if err != nil {
+		return nil, fmt.Errorf("read compressed data: %w", err)
+	}
+	return decompressedContent, nil
 }

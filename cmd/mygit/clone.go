@@ -17,6 +17,7 @@ import (
 var (
 	errInvalidPacketLineLength = errors.New("invalid packet length")
 	errNoWants                 = errors.New("no wants provided in the body")
+	errInvalidObjectType       = errors.New("invalid object type")
 )
 
 var (
@@ -282,13 +283,32 @@ func ParseDiscoverRefResponse(body io.ReadCloser) error {
 	if !bytes.Equal(pkt.Content, ackHeader) && !bytes.Equal(pkt.Content, nakHeader) {
 		return fmt.Errorf("packet is neither ACK not NAK: %v", pkt.Content)
 	}
-	_, err = validatePackFileHeader(body)
+	objCount, err := validatePackFileHeader(body)
 	if err != nil {
 		return fmt.Errorf("invalid pack header: %w", err)
+	}
+	var i uint32
+	for i = 0; i < objCount; i++ {
+		objType, size, err := readPackObjectSize(body)
+		if err != nil {
+			return fmt.Errorf("read pack object size: %w", err)
+		}
+		fmt.Printf("[INFO] %03d reading %s with %d size\n", i, objType, size)
+		temp1 := make([]byte, size)
+		_, err = io.ReadFull(body, temp1)
+		if err != nil {
+			return fmt.Errorf("reading only %d content: %w", size, err)
+		}
+		_, err = ParsePacketObject(bytes.NewReader(temp1), objType)
+		if err != nil {
+			return fmt.Errorf("reading packet object: %w", err)
+		}
 	}
 	return nil
 }
 
+// validatePackFileHeader valides the header of pack file
+// and it returns the number of objects in the pack file
 func validatePackFileHeader(body io.Reader) (uint32, error) {
 	packBuf := [4]byte{}
 	_, err := io.ReadFull(body, packBuf[:])
@@ -315,7 +335,7 @@ func validatePackFileHeader(body io.Reader) (uint32, error) {
 	return GetIntFromBigIndian(numOfObjBuf), nil
 }
 
-func readPackFileHeader(r io.Reader) (ObjectType, int, error) {
+func readPackObjectSize(r io.Reader) (ObjectType, int, error) {
 	buf := [1]byte{} // we will read the first byte
 	if _, err := io.ReadFull(r, buf[:]); err != nil {
 		return 0, 0, fmt.Errorf("read first byte of pack object: %w", err)
@@ -339,4 +359,95 @@ func readPackFileHeader(r io.Reader) (ObjectType, int, error) {
 		shift += 7
 	}
 	return validateObjectType(objType), size, nil
+}
+
+func ParsePacketObject(r io.Reader, objType ObjectType) ([]byte, error) {
+	switch objType {
+	case OBJ_INVALID:
+		return nil, fmt.Errorf("read packet object %s :%w", OBJ_INVALID, errInvalidObjectType)
+	case OBJ_COMMIT, OBJ_TREE, OBJ_BLOB, OBJ_TAG:
+		return parseUndeltifiedPackObject(r, objType)
+	case OBJ_OFS_DELTA:
+		return parseOffsetDeltaObject(r)
+	case OBJ_REF_DELTA:
+		return parseRefDeltaObject(r)
+	default:
+		return nil, fmt.Errorf("read packet object %s :%w", objType, errInvalidObjectType)
+	}
+}
+
+// parseUndeltifiedPackObject for parsing pack objects with types "commit", "tag", "blob", "tree"
+func parseUndeltifiedPackObject(r io.Reader, typ ObjectType) ([]byte, error) {
+	decompressedContent, err := ReadCompressed(r)
+	if err != nil {
+		return nil, fmt.Errorf("parse undeltified: read object: %w", err)
+	}
+	fmt.Println("---------------------------------------------------------")
+	fmt.Printf("%v\n", decompressedContent)
+	fmt.Println("---------------------------------------------------------")
+	return FormatGitObjectContent(typ.ToGitType(), decompressedContent), nil
+}
+
+// Parses an OBJ_OFS_DELTA (offset delta object)
+func parseOffsetDeltaObject(r io.Reader) ([]byte, error) {
+	// Read variable-length offset (base object position)
+	offset, err := readVariableLengthOffset(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read base offset: %w", err)
+	}
+
+	// Read and decompress delta instructions
+	deltaData, err := ReadCompressed(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read delta data: %w", err)
+	}
+
+	fmt.Printf("[INFO] Read OFS_DELTA base offset: %d\n", offset)
+	fmt.Printf("[INFO] Delta Data: %v\n", deltaData)
+
+	// Delta application logic would go here (requires the base object)
+	return deltaData, nil
+}
+
+// Parses an OBJ_REF_DELTA (reference delta object)
+func parseRefDeltaObject(r io.Reader) ([]byte, error) {
+	// Read 20-byte base object hash
+	baseHash := [20]byte{}
+	if _, err := io.ReadFull(r, baseHash[:]); err != nil {
+		return nil, fmt.Errorf("failed to read base object hash: %w", err)
+	}
+
+	// Read and decompress delta instructions
+	deltaData, err := ReadCompressed(r)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read delta data: %w", err)
+	}
+
+	fmt.Printf("[INFO] Read REF_DELTA base hash: %x\n", baseHash)
+	fmt.Printf("[INFO] Delta Data: %v\n", deltaData)
+
+	// Delta application logic would go here (requires the base object)
+	return deltaData, nil
+}
+
+// Reads a variable-length offset (used in OBJ_OFS_DELTA)
+func readVariableLengthOffset(r io.Reader) (int64, error) {
+	var offset int64
+	buf := [1]byte{}
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
+		return 0, fmt.Errorf("read offset byte: %w", err)
+	}
+
+	b := buf[0]
+	offset = int64(b & 0x7F)
+
+	for (b & 0x80) != 0 {
+		offset += 1
+		if _, err := io.ReadFull(r, buf[:]); err != nil {
+			return 0, fmt.Errorf("read offset byte: %w", err)
+		}
+		b = buf[0]
+		offset = (offset << 7) | int64(b&0x7F)
+	}
+	return offset, nil
 }
