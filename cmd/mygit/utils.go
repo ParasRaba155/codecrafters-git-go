@@ -32,23 +32,20 @@ func (ew *errWriter) write(buf []byte) {
 // GetFileFromHash splits the hash into git object format
 //
 // e.g. "23abcdefgh...." -> ./git/objects/23/<remaniing_28_chars>
-func GetFileFromHash(objHash string) *os.File {
+func GetFileFromHash(objHash string) (*os.File, error) {
 	if len(objHash) != 40 {
-		ePrintf("invalid object hash: %q", objHash)
-		os.Exit(1)
+		return nil, fmt.Errorf("invalid object hash: %q", objHash)
 	}
 	dir, rest := objHash[0:2], objHash[2:]
 	path := filepath.Join(".git/objects", dir, rest)
 	file, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			ePrintf("no such object: %q", objHash)
-			os.Exit(1)
+			return nil, fmt.Errorf("no such object: %q", objHash)
 		}
-		ePrintf("could not open the object file: %v", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("could not open the object file %q: %w", objHash, err)
 	}
-	return file
+	return file, nil
 }
 
 // GetIntFromBigIndian converts to 4 byte Big-Endian to a uint32
@@ -60,6 +57,11 @@ func GetIntFromBigIndian(bytes [4]byte) uint32 {
 func ReadCompressed(r io.Reader) ([]byte, error) {
 	zlibReader, err := zlib.NewReader(r)
 	if err != nil {
+		full, err2 := io.ReadAll(r)
+		fmt.Println(err2)
+		fmt.Println("----------------DEBUG-------------------------------------")
+		fmt.Printf("%s", full)
+		fmt.Println("----------------DEBUG-------------------------------------")
 		return nil, fmt.Errorf("read compressed: create zlib reader: %w", err)
 	}
 	defer func() {

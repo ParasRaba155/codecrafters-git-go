@@ -288,21 +288,23 @@ func ParseDiscoverRefResponse(body io.ReadCloser) error {
 		return fmt.Errorf("invalid pack header: %w", err)
 	}
 	var i uint32
+	fmt.Printf("[INFO] number of object: %d\n", objCount)
 	for i = 0; i < objCount; i++ {
-		objType, size, err := readPackObjectSize(body)
+		// objType, size, err := readPackObjectSize(body)
+		size, err := readSize(body)
 		if err != nil {
 			return fmt.Errorf("read pack object size: %w", err)
 		}
+		buf := make([]byte, size)
+		n, err := io.ReadFull(body, buf)
+		if err != nil {
+			panic(fmt.Errorf("hard code full read %d:%s", n, err))
+		}
 		fmt.Printf("[INFO] %03d reading %s with %d size\n", i, objType, size)
-		temp1 := make([]byte, size)
-		_, err = io.ReadFull(body, temp1)
-		if err != nil {
-			return fmt.Errorf("reading only %d content: %w", size, err)
-		}
-		_, err = ParsePacketObject(bytes.NewReader(temp1), objType)
-		if err != nil {
-			return fmt.Errorf("reading packet object: %w", err)
-		}
+		// _, err = ParsePacketObject(body, objType, size)
+		// if err != nil {
+		// 	return fmt.Errorf("reading packet object: %w", err)
+		// }
 	}
 	return nil
 }
@@ -335,7 +337,7 @@ func validatePackFileHeader(body io.Reader) (uint32, error) {
 	return GetIntFromBigIndian(numOfObjBuf), nil
 }
 
-func readPackObjectSize(r io.Reader) (ObjectType, int, error) {
+func readPackObjectSize(r io.Reader) (ObjectType, uint64, error) {
 	buf := [1]byte{} // we will read the first byte
 	if _, err := io.ReadFull(r, buf[:]); err != nil {
 		return 0, 0, fmt.Errorf("read first byte of pack object: %w", err)
@@ -346,39 +348,66 @@ func readPackObjectSize(r io.Reader) (ObjectType, int, error) {
 	// NOTE: 0x7F: `0b01111111` to extract the last 7 bits
 
 	b := buf[0]
-	size := int(b & 0x0F)
+	size := uint64(b & 0x0F)
 	objType := (b >> 4) & 0x07
 
-	shift := 4
+	var shift uint64
+	shift = 4
+	fmt.Printf("[DEBUG] Raw byte: %08b, Size: %d, Shift: %d, ObjType: %d\n", b, size, shift, objType)
 	for (b & 0x80) != 0 { // While MSB is set
 		if _, err := io.ReadFull(r, buf[:]); err != nil {
 			return 0, 0, fmt.Errorf("read size bytes: %w", err)
 		}
 		b = buf[0]
-		size |= int(b&0x7F) << shift
+		size |= uint64(b&0x7F) << shift
 		shift += 7
+		fmt.Printf("[DEBUG] Raw byte: %08b, Size: %d, Shift: %d, ObjType: %d\n", b, size, shift, objType)
 	}
-	return validateObjectType(objType), size, nil
+	return convertToObjectType(objType), size, nil
 }
 
-func ParsePacketObject(r io.Reader, objType ObjectType) ([]byte, error) {
+func readSize(r io.Reader) (size uint64, err error) {
+	buf := [1]byte{}
+	if _, err := io.ReadFull(r, buf[:]); err != nil {
+		return 0, fmt.Errorf("read first byte of pack object: %w", err)
+	}
+	b := buf[0]
+	size = uint64(b & 0x7F)
+	shift := 7
+	for b&0x80 != 0 {
+		if _, err := io.ReadFull(r, buf[:]); err != nil {
+			return 0, fmt.Errorf("read first byte of pack object: %w", err)
+		}
+		b = buf[0]
+		size += uint64(b&0x7F) << shift
+		shift += 7
+	}
+	return size, nil
+}
+
+func ParsePacketObject(r io.Reader, objType ObjectType, size int) ([]byte, error) {
 	switch objType {
 	case OBJ_INVALID:
 		return nil, fmt.Errorf("read packet object %s :%w", OBJ_INVALID, errInvalidObjectType)
 	case OBJ_COMMIT, OBJ_TREE, OBJ_BLOB, OBJ_TAG:
-		return parseUndeltifiedPackObject(r, objType)
+		return parseUndeltifiedPackObject(r, objType, size)
 	case OBJ_OFS_DELTA:
 		return parseOffsetDeltaObject(r)
 	case OBJ_REF_DELTA:
-		return parseRefDeltaObject(r)
+		return parseRefDeltaObject(r, size)
 	default:
 		return nil, fmt.Errorf("read packet object %s :%w", objType, errInvalidObjectType)
 	}
 }
 
 // parseUndeltifiedPackObject for parsing pack objects with types "commit", "tag", "blob", "tree"
-func parseUndeltifiedPackObject(r io.Reader, typ ObjectType) ([]byte, error) {
-	decompressedContent, err := ReadCompressed(r)
+func parseUndeltifiedPackObject(r io.Reader, typ ObjectType, size int) ([]byte, error) {
+	buf := make([]byte, size)
+	_, err := io.ReadFull(r, buf)
+	if err != nil {
+		return nil, fmt.Errorf("parse undeltified: fill buffer: %w", err)
+	}
+	decompressedContent, err := ReadCompressed(bytes.NewReader(buf))
 	if err != nil {
 		return nil, fmt.Errorf("parse undeltified: read object: %w", err)
 	}
@@ -396,8 +425,19 @@ func parseOffsetDeltaObject(r io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read base offset: %w", err)
 	}
 
+	size, err := readSize(r)
+	if err != nil {
+		return nil, fmt.Errorf("parse offset delta: read size: %w", err)
+	}
+
+	// Create buffer and read the delta data
+	buf := make([]byte, size)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return nil, fmt.Errorf("parse offset delta: fill buffer: %w", err)
+	}
+
 	// Read and decompress delta instructions
-	deltaData, err := ReadCompressed(r)
+	deltaData, err := ReadCompressed(bytes.NewReader(buf))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read delta data: %w", err)
 	}
@@ -410,15 +450,20 @@ func parseOffsetDeltaObject(r io.Reader) ([]byte, error) {
 }
 
 // Parses an OBJ_REF_DELTA (reference delta object)
-func parseRefDeltaObject(r io.Reader) ([]byte, error) {
+func parseRefDeltaObject(r io.Reader, size int) ([]byte, error) {
 	// Read 20-byte base object hash
 	baseHash := [20]byte{}
 	if _, err := io.ReadFull(r, baseHash[:]); err != nil {
 		return nil, fmt.Errorf("failed to read base object hash: %w", err)
 	}
+	buf := make([]byte, size)
+	_, err := io.ReadFull(r, buf)
+	if err != nil {
+		return nil, fmt.Errorf("parse undeltified: fill buffer: %w", err)
+	}
 
 	// Read and decompress delta instructions
-	deltaData, err := ReadCompressed(r)
+	deltaData, err := ReadCompressed(bytes.NewReader(buf))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read delta data: %w", err)
 	}

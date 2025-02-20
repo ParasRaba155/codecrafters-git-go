@@ -27,7 +27,10 @@ func initCMD() error {
 
 // catFileCmd has the logic for the cat-file subcommand
 func catFileCmd(hash string) error {
-	file := GetFileFromHash(hash)
+	file, err := GetFileFromHash(hash)
+	if err != nil {
+		return fmt.Errorf("cat File command: get file from hash: %w", err)
+	}
 	defer file.Close()
 	content, objectType, err := ReadObjectFile(file)
 	if err != nil {
@@ -69,7 +72,10 @@ func hashObjectCmd(fileName string) error {
 }
 
 func lsTreeCmd(hash string) error {
-	file := GetFileFromHash(hash)
+	file, err := GetFileFromHash(hash)
+	if err != nil {
+		return fmt.Errorf("ls tree command: get file from hash: %w", err)
+	}
 	defer file.Close()
 	content, objectType, err := ReadObjectFile(file)
 	if err != nil {

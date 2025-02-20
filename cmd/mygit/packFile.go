@@ -13,8 +13,8 @@ const (
 	OBJ_REF_DELTA ObjectType = 7
 )
 
-// validateObjectType will check whether it is a valid object-type value, if it's not it will return ObjectType 0 for invalid
-func validateObjectType(s byte) ObjectType {
+// convertToObjectType will check whether it is a valid object-type value, if it's not it will return ObjectType 0 for invalid
+func convertToObjectType(s byte) ObjectType {
 	if s > 7 {
 		return OBJ_INVALID
 	}

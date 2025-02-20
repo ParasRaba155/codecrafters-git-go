@@ -64,7 +64,7 @@ func Test_ReadPackFileHeader(t *testing.T) {
 
 	testCases := [...]struct {
 		input            []byte
-		outputSize       int
+		outputSize       uint64
 		outputObjectType ObjectType
 	}{
 		{
