@@ -290,11 +290,7 @@ func ParseDiscoverRefResponse(body io.ReadCloser) error {
 	var i uint32
 	fmt.Printf("[INFO] number of object: %d\n", objCount)
 	for i = 0; i < objCount; i++ {
-		// objType, size, err := readPackObjectSize(body)
-		size, err := readSize(body)
-		if err != nil {
-			return fmt.Errorf("read pack object size: %w", err)
-		}
+		objType, size, err := readPackObjectSize(body)
 		buf := make([]byte, size)
 		n, err := io.ReadFull(body, buf)
 		if err != nil {
