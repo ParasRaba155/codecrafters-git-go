@@ -289,12 +289,24 @@ func ParseDiscoverRefResponse(body io.ReadCloser) error {
 	}
 	var i uint32
 	fmt.Printf("[INFO] number of object: %d\n", objCount)
+	bodyBytes, err := io.ReadAll(body)
+	if err != nil {
+		panic(fmt.Errorf("read full body: %w", err))
+	}
+	seeker := bytes.NewReader(bodyBytes)
 	for i = 0; i < objCount; i++ {
-		objType, size, err := readPackObjectSize(body)
-		buf := make([]byte, size)
-		n, err := io.ReadFull(body, buf)
+		objType, size, err := readTypeAndSize(seeker)
 		if err != nil {
-			panic(fmt.Errorf("hard code full read %d:%s", n, err))
+			panic(fmt.Errorf("read object size for type: %s and size: %d: %w", objType, size, err))
+		}
+		if objType == OBJ_COMMIT || objType == OBJ_TREE || objType == OBJ_BLOB || objType == OBJ_TAG {
+			buf := make([]byte, size)
+			n, err := io.ReadFull(seeker, buf)
+			if err != nil {
+				panic(fmt.Errorf("hard code full read %d:%s", n, err))
+			}
+		} else {
+			fmt.Println("WE ARE THE SPARTANS")
 		}
 		fmt.Printf("[INFO] %03d reading %s with %d size\n", i, objType, size)
 		// _, err = ParsePacketObject(body, objType, size)
@@ -333,34 +345,40 @@ func validatePackFileHeader(body io.Reader) (uint32, error) {
 	return GetIntFromBigIndian(numOfObjBuf), nil
 }
 
-func readPackObjectSize(r io.Reader) (ObjectType, uint64, error) {
-	buf := [1]byte{} // we will read the first byte
-	if _, err := io.ReadFull(r, buf[:]); err != nil {
-		return 0, 0, fmt.Errorf("read first byte of pack object: %w", err)
-	}
-	// NOTE: 0x0F: `0b00001111` to extract the lower 4 bits
-	// NOTE 0x07: `0b00000111` to extract the lower 3 bits
-	// NOTE: 0x80: `0b10000000` to extract the MSB (Most Significant Bit)
-	// NOTE: 0x7F: `0b01111111` to extract the last 7 bits
-
-	b := buf[0]
-	size := uint64(b & 0x0F)
-	objType := (b >> 4) & 0x07
-
-	var shift uint64
-	shift = 4
-	fmt.Printf("[DEBUG] Raw byte: %08b, Size: %d, Shift: %d, ObjType: %d\n", b, size, shift, objType)
-	for (b & 0x80) != 0 { // While MSB is set
-		if _, err := io.ReadFull(r, buf[:]); err != nil {
-			return 0, 0, fmt.Errorf("read size bytes: %w", err)
-		}
-		b = buf[0]
-		size |= uint64(b&0x7F) << shift
-		shift += 7
-		fmt.Printf("[DEBUG] Raw byte: %08b, Size: %d, Shift: %d, ObjType: %d\n", b, size, shift, objType)
-	}
-	return convertToObjectType(objType), size, nil
-}
+// func readPackObjectHeader(r io.Reader) (ObjectType, uint64, error) {
+// 	buf := [1]byte{} // we will read the first byte
+// 	n, err := io.ReadFull(r, buf[:])
+// 	if err != nil {
+// 		return 0, 0, fmt.Errorf("read first byte of pack object: %w", err)
+// 	}
+// 	fmt.Printf("[DEBUG] read %d bytes\n", n)
+// 	// NOTE: 0x0F: `0b00001111` to extract the lower 4 bits
+// 	// NOTE 0x07: `0b00000111` to extract the lower 3 bits
+// 	// NOTE: 0x80: `0b10000000` to extract the MSB (Most Significant Bit)
+// 	// NOTE: 0x7F: `0b01111111` to extract the last 7 bits
+//
+// 	b := buf[0]
+// 	size := uint64(b & 0x0F)
+// 	objType := (b >> 4) & 0x07
+//
+// 	var shift uint64 = 4
+// 	fmt.Printf("[DEBUG] BEFORE LOOP Raw byte: %08b, Size: %d, Shift: %d, ObjType: %d\n", b, size, shift, objType)
+// 	for (b & 0x80) != 0 { // While MSB is set
+// 		if shift >= 64 {
+// 			return 0, 0, fmt.Errorf("bad object header: shift %d", shift)
+// 		}
+// 		n, err := io.ReadFull(r, buf[:])
+// 		if err != nil {
+// 			return 0, 0, fmt.Errorf("read size bytes: %w", err)
+// 		}
+// 		fmt.Printf("[DEBUG] read %d bytes\n", n)
+// 		b = buf[0]
+// 		size |= uint64(b&0x7F) << shift
+// 		shift += 7
+// 		fmt.Printf("[DEBUG] Raw byte: %08b, Size: %d, Shift: %d, ObjType: %d\n", b, size, shift, objType)
+// 	}
+// 	return convertToObjectType(objType), size, nil
+// }
 
 func readSize(r io.Reader) (size uint64, err error) {
 	buf := [1]byte{}
