@@ -137,25 +137,5 @@ func cloneCmd(repoLink, dirToCloneAt string) error {
 	if err != nil && !os.IsExist(err) {
 		return fmt.Errorf("create the dir to clone the repo: %w", err)
 	}
-	refContent, err := FetchRefs(repoLink)
-	if err != nil {
-		return fmt.Errorf("get packet file: %w", err)
-	}
-	refPacketLines, err := ParsePacketFile(refContent)
-	if err != nil {
-		return fmt.Errorf("validate packet file: %w", err)
-	}
-	refs, err := RefRecordsFromPacketLines(refPacketLines)
-	if err != nil {
-		return fmt.Errorf("get ref records: %w", err)
-	}
-	discoverRefResponse, err := DiscoverRef(repoLink, refs)
-	if err != nil {
-		return fmt.Errorf("discoverRef: %w", err)
-	}
-	err = ParseDiscoverRefResponse(discoverRefResponse)
-	if err != nil {
-		return fmt.Errorf("parseRefDiscoveryResponse: %w", err)
-	}
 	return nil
 }
