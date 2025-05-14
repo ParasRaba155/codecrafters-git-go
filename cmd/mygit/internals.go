@@ -170,7 +170,7 @@ func FormatGitObjectContent(typ string, content []byte) []byte {
 	contentLength := len(content)
 	contentDigitLength := numOfDigits(contentLength)
 
-	result := make([]byte, 0, len(typ)+contentLength+1+contentDigitLength+len(content))
+	result := make([]byte, 0, len(typ)+1+contentDigitLength+1+len(content))
 	// append type
 	result = append(result, typ...)
 	// append the space
