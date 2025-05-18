@@ -14,6 +14,11 @@ type GitRef struct {
 	Name string
 }
 
+type PackHeader struct {
+	Version      uint32
+	NumOfObjects uint32
+}
+
 func GitSmartProtocolGetRefs(repLink string) ([]byte, error) {
 	fmt.Printf("DEBUG: repo link provide: %s\n", repLink)
 	refUrl := fmt.Sprintf("%s/info/refs?service=%s", repLink, gitUploadPack)
@@ -108,24 +113,60 @@ func generateRefDiscoveryRequest(refs []GitRef) []byte {
 }
 
 func ReadPackFile(content []byte) error {
-	offset := 0
+	offset, packHeader, err := readPackFileHeader(content)
+	if err != nil {
+		return fmt.Errorf("ReadPackFile: read header: %w", err)
+	}
+	content = content[offset : len(content)-20] // last 20 bytes are hash sum of packfile
+	err = readPackFileBody(content, int(packHeader.NumOfObjects))
+	if err != nil {
+		return fmt.Errorf("err: %w", err)
+	}
+	fmt.Printf("content is fully read: %t %d", len(content) == 0, len(content))
+	return nil
+}
+
+// readPackFileHeader will read the header, and return the number of bytes
+// read by it (offset) along side the header and error
+func readPackFileHeader(content []byte) (int, PackHeader, error) {
+	offset, packHeader := 0, PackHeader{}
 	if !bytes.Equal(content[offset:offset+8], []byte{'0', '0', '0', '8', 'N', 'A', 'K', '\n'}) {
-		return fmt.Errorf("first 8 bytes must be 0008NAK: %s", content[offset:offset+8])
+		return offset, packHeader, fmt.Errorf("first 8 bytes must be 0008NAK: %s", content[offset:offset+8])
 	}
 	offset += 8
 
 	if !bytes.Equal(content[offset:offset+4], []byte{'P', 'A', 'C', 'K'}) {
-		return fmt.Errorf("first 4 bytes must be PACK: %s", content[offset:offset+4])
+		return offset, packHeader, fmt.Errorf("first 4 bytes must be PACK: %s", content[offset:offset+4])
 	}
 	offset += 4
 
 	version := readBigEndian([4]byte(content[offset : offset+4]))
 	if version != 2 && version != 3 {
-		return fmt.Errorf("invalid pack file version: %d", version)
+		return offset, packHeader, fmt.Errorf("invalid pack file version: %d", version)
 	}
 	offset += 4
 
 	numOfObject := readBigEndian([4]byte(content[offset : offset+4]))
-	fmt.Println(numOfObject)
+	offset += 4
+	packHeader.NumOfObjects = numOfObject
+	packHeader.Version = version
+	return offset, packHeader, nil
+}
+
+func readPackFileBody(content []byte, numOfObj int) error {
+	offset := 0
+	fmt.Printf("len(content) = %d, offset = %d\n", len(content), offset)
+	for i := range numOfObj {
+		length, objType, used, err := packObjectSize(content[offset:])
+		if err != nil {
+			return fmt.Errorf("reading the size of %d object: %w", i, err)
+		}
+
+		offset += used + int(length) // start of next object
+		fmt.Printf("%03d object type = %s, length = %d numOfBytes: %d\n", i, objType, length, used)
+		if offset >= len(content) {
+			return fmt.Errorf("readPackFileBody: offset %d exceeded content length %d while processing object %d", offset, len(content), i)
+		}
+	}
 	return nil
 }

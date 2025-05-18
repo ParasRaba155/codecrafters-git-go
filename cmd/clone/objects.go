@@ -2,19 +2,19 @@ package clone
 
 import "fmt"
 
-type ObjectType byte
+type GitObjectType byte
 
 const (
-	OBJ_INVALID   ObjectType = 0
-	OBJ_COMMIT    ObjectType = 1
-	OBJ_TREE      ObjectType = 2
-	OBJ_BLOB      ObjectType = 3
-	OBJ_TAG       ObjectType = 4
-	OBJ_OFS_DELTA ObjectType = 6
-	OBJ_REF_DELTA ObjectType = 7
+	OBJ_INVALID   GitObjectType = 0
+	OBJ_COMMIT    GitObjectType = 1
+	OBJ_TREE      GitObjectType = 2
+	OBJ_BLOB      GitObjectType = 3
+	OBJ_TAG       GitObjectType = 4
+	OBJ_OFS_DELTA GitObjectType = 6
+	OBJ_REF_DELTA GitObjectType = 7
 )
 
-func (o ObjectType) String() string {
+func (o GitObjectType) String() string {
 	switch o {
 	case OBJ_TREE:
 		return "tree"
@@ -31,6 +31,12 @@ func (o ObjectType) String() string {
 	default:
 		return fmt.Sprintf("invalid(%d))", o)
 	}
+}
+
+type GitObject struct {
+	ObjectType GitObjectType
+	Size       int
+	Content    []byte
 }
 
 const (
