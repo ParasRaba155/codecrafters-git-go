@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/codecrafters-io/git-starter-go/cmd/clone"
 )
 
 // initCMD has the logic for the init subcommand
@@ -132,10 +134,27 @@ func commitTreeCmd(treeSHA, commitSHA, commitMsg string) error {
 }
 
 func cloneCmd(repoLink, dirToCloneAt string) error {
-	// err := os.Mkdir(dirToCloneAt, os.ModeDir|os.FileMode(0755))
+	err := os.Mkdir(dirToCloneAt, os.ModeDir|os.FileMode(0755))
 
-	// if err != nil && !os.IsExist(err) {
-	// 	return fmt.Errorf("create the dir to clone the repo: %w", err)
-	// }
+	if err != nil && !os.IsExist(err) {
+		return fmt.Errorf("create the dir to clone the repo: %w", err)
+	}
+	gitRefResponse, err := clone.GitSmartProtocolGetRefs(repoLink)
+	if err != nil {
+		return fmt.Errorf("git smart protocol for ref fetching: %w", err)
+	}
+
+	refs, err := clone.GetRefList(gitRefResponse)
+	if err != nil {
+		return fmt.Errorf("git smart protocol for ref list parsing: %w", err)
+	}
+	packfileContent, err := clone.RefDiscovery(repoLink, refs)
+	if err != nil {
+		return fmt.Errorf("git smart protocol for ref discovery: %w", err)
+	}
+	err = clone.ReadPackFile(packfileContent)
+	if err != nil {
+		return err
+	}
 	return nil
 }

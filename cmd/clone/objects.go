@@ -1,6 +1,7 @@
-package main
+package clone
 
-//go:generate stringer -type=ObjectType
+import "fmt"
+
 type ObjectType byte
 
 const (
@@ -13,7 +14,7 @@ const (
 	OBJ_REF_DELTA ObjectType = 7
 )
 
-func (o ObjectType) ToGitType() string {
+func (o ObjectType) String() string {
 	switch o {
 	case OBJ_TREE:
 		return "tree"
@@ -28,7 +29,7 @@ func (o ObjectType) ToGitType() string {
 	case OBJ_REF_DELTA:
 		return "refdelta"
 	default:
-		return ""
+		return fmt.Sprintf("invalid(%d))", o)
 	}
 }
 
