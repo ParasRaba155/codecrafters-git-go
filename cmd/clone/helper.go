@@ -1,8 +1,12 @@
 package clone
 
 import (
+	"bytes"
+	"compress/zlib"
+	"crypto/sha1"
 	"errors"
 	"fmt"
+	"io"
 )
 
 var errInvalidSize = errors.New("invalid size")
@@ -48,4 +52,53 @@ func packObjectSize(content []byte) (length uint64, objType GitObjectType, bytes
 		bitShift += 7
 	}
 	return length, objType, bytesRead, nil
+}
+
+// findAndDecompress: Search for a valid zlib stream in raw byte content and decompress it
+func findAndDecompress(data []byte) (compressed []byte, decompressed []byte, used int, err error) {
+	// NOTE: we specifically use the bytes.NewReader because it implements
+	// [io.ByteReader](https://pkg.go.dev/io#ByteReader)
+	// which will ensure that only the compressed data is read
+	// We could also go with [bytes.NewBuffer](https://pkg.go.dev/bytes#NewBuffer) as [bytes.Buffer](https://pkg.go.dev/bytes#Buffer)
+	// also implements the [io.ByteReader](https://pkg.go.dev/io#ByteReader)
+	reader := bytes.NewReader(data)
+	zlibReader, err := zlib.NewReader(reader)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("creating zlib reader: %w", err)
+	}
+	defer zlibReader.Close()
+
+	decompressed, err = io.ReadAll(zlibReader)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("reading uncompressed data: %w", err)
+	}
+
+	// The crucial part: How many bytes did the zlib.Reader actually consume from 'reader'?
+	// The bytes.NewReader keeps track of its current position.
+	// Total size - remaining bytes = bytes read
+	used = int(reader.Size()) - reader.Len()
+
+	compressed = data[:used]
+
+	return compressed, decompressed, used, nil
+}
+
+func getRawSHA(content []byte) ([20]byte, error) {
+	hasher := sha1.New()
+	n, err := hasher.Write(content)
+	if err != nil {
+		return [20]byte{}, err
+	}
+	if n != len(content) {
+		return [20]byte{}, fmt.Errorf(
+			"mismatch in the bytes written and content: %d and %d",
+			n,
+			len(content),
+		)
+	}
+	res := hasher.Sum(nil)
+	if len(res) != 20 {
+		return [20]byte{}, fmt.Errorf("malformed hash created with '%d' bytes", len(res))
+	}
+	return [20]byte(res), nil
 }

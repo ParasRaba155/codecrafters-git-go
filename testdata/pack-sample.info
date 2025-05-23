@@ -1,0 +1,8 @@
+Packfile Headers
+- Signature: PACK
+- Version: 2
+- Entries: 3
+
+[0K96438dd1e26e6963fa65be0012e8f6e84209bc5d	OBJ_COMMIT	653
+[0K5297f8f21ad868d9eb6a9c01ad09a9d186177047	OBJ_BLOB	10
+[0Kbf195faf9d23ce0615cdefd2b746a077ef82f03f	OBJ_TREE	37

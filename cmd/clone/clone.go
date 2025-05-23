@@ -2,6 +2,7 @@ package clone
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -113,16 +114,16 @@ func generateRefDiscoveryRequest(refs []GitRef) []byte {
 }
 
 func ReadPackFile(content []byte) error {
+	fmt.Printf("ReadPackFile content length: %d\n", len(content))
 	offset, packHeader, err := readPackFileHeader(content)
 	if err != nil {
 		return fmt.Errorf("ReadPackFile: read header: %w", err)
 	}
-	content = content[offset : len(content)-20] // last 20 bytes are hash sum of packfile
+	content = content[offset:]
 	err = readPackFileBody(content, int(packHeader.NumOfObjects))
 	if err != nil {
 		return fmt.Errorf("err: %w", err)
 	}
-	fmt.Printf("content is fully read: %t %d", len(content) == 0, len(content))
 	return nil
 }
 
@@ -130,10 +131,10 @@ func ReadPackFile(content []byte) error {
 // read by it (offset) along side the header and error
 func readPackFileHeader(content []byte) (int, PackHeader, error) {
 	offset, packHeader := 0, PackHeader{}
-	if !bytes.Equal(content[offset:offset+8], []byte{'0', '0', '0', '8', 'N', 'A', 'K', '\n'}) {
-		return offset, packHeader, fmt.Errorf("first 8 bytes must be 0008NAK: %s", content[offset:offset+8])
+	if bytes.Equal(content[offset:offset+8], []byte{'0', '0', '0', '8', 'N', 'A', 'K', '\n'}) {
+		// return offset, packHeader, fmt.Errorf("first 8 bytes must be 0008NAK: %s", content[offset:offset+8])
+		offset += 8
 	}
-	offset += 8
 
 	if !bytes.Equal(content[offset:offset+4], []byte{'P', 'A', 'C', 'K'}) {
 		return offset, packHeader, fmt.Errorf("first 4 bytes must be PACK: %s", content[offset:offset+4])
@@ -155,18 +156,40 @@ func readPackFileHeader(content []byte) (int, PackHeader, error) {
 
 func readPackFileBody(content []byte, numOfObj int) error {
 	offset := 0
-	fmt.Printf("len(content) = %d, offset = %d\n", len(content), offset)
+	fmt.Printf("readPackFileBody = %d\n", len(content))
 	for i := range numOfObj {
-		length, objType, used, err := packObjectSize(content[offset:])
+		length, objType, headerBytesRead, err := packObjectSize(content[offset:])
 		if err != nil {
 			return fmt.Errorf("reading the size of %d object: %w", i, err)
 		}
 
-		offset += used + int(length) // start of next object
-		fmt.Printf("%03d object type = %s, length = %d numOfBytes: %d\n", i, objType, length, used)
-		if offset >= len(content) {
-			return fmt.Errorf("readPackFileBody: offset %d exceeded content length %d while processing object %d", offset, len(content), i)
+		switch objType {
+		case OBJ_TAG, OBJ_BLOB, OBJ_COMMIT, OBJ_TREE:
+		case OBJ_REF_DELTA:
+			basObjHash := hex.EncodeToString(content[offset : offset+20])
+			offset += 20
+			fmt.Printf("basObjHash: %s\n", basObjHash)
+		case OBJ_OFS_DELTA:
+		default:
+			panic(fmt.Sprintf("unimplemented %s", objType))
+		}
+
+		compressed, decompressed, used, err := findAndDecompress(content[offset+headerBytesRead:])
+		if err != nil {
+			return fmt.Errorf("decompressing object %d: %w", i, err)
+		}
+
+		fmt.Printf(
+			"%03d object type = %s, declared length = %d, headerBytesRead  = %d, compressed bytes = %d, decompressed bytes = %d used = %d\n",
+			i, objType, length, headerBytesRead, len(compressed), len(decompressed), used,
+		)
+
+		offset += headerBytesRead + used
+		fmt.Printf("offset: %d\n", offset)
+		if offset > len(content) {
+			return fmt.Errorf("offset %d exceeded content length %d after object %d", offset, len(content), i)
 		}
 	}
+	fmt.Printf("final body offset: %d\n", offset)
 	return nil
 }
