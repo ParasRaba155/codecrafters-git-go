@@ -11,8 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
+	"strings"
 	"time"
+
+	"github.com/codecrafters-io/git-starter-go/cmd/common"
 )
 
 const (
@@ -201,43 +203,42 @@ func ParseTreeObjectBody(content []byte) ([]GitTree, error) {
 	//// tree <size>\0
 	//// <mode> <name>\0<20_byte_sha>
 	//// <mode> <name>\0<20_byte_sha>
-	result := []GitTree{}
+	result, i := []GitTree{}, 0
 
-	beforeSpace := 0
-	beforeName := 0
-	for i := 0; i < len(content); i++ {
-		curr := GitTree{}
-		if content[i] == ' ' {
-			fileMode := content[beforeSpace:i]
-			mode, err := strconv.Atoi(string(fileMode))
-			if err != nil {
-				return nil, err
-			}
-			curr.Mode = fs.FileMode(mode)
-			beforeName = i + 1
+	for i < len(content) {
+		// Parse mode
+		modeStart := i
+		for content[i] != ' ' {
+			i++
 		}
-		if content[i] == 0 {
-			// Extract name
-			name := content[beforeName:i]
+		modeStr := string(content[modeStart:i])
+		mode := modeFromGit(modeStr)
+		i++ // Skip the space
 
-			// Ensure there are at least 20 bytes for the SHA
-			if i+1+20 > len(content) {
-				return nil, fmt.Errorf("unexpected end of content while reading SHA")
-			}
-
-			// Extract and copy the SHA
-			var sha [20]byte
-			copy(sha[:], content[i+1:i+1+20])
-
-			curr.Name = string(name)
-			curr.SHA = sha
-
-			// Move to the next entry
-			beforeSpace = i + 21
-			i += 20 // Skip over the SHA bytes
-			result = append(result, curr)
+		// Parse name
+		nameStart := i
+		for content[i] != 0 {
+			i++
 		}
+		name := string(content[nameStart:i])
+		i++ // Skip the null terminator
+
+		// Parse SHA (20 bytes)
+		if i+20 > len(content) {
+			return nil, fmt.Errorf("unexpected end of content while reading SHA")
+		}
+		var sha [20]byte
+		copy(sha[:], content[i:i+20])
+		i += 20
+
+		result = append(result, GitTree{
+			Mode:    mode,
+			GitMode: modeStr,
+			Name:    name,
+			SHA:     sha,
+		})
 	}
+
 	return result, nil
 }
 
@@ -415,4 +416,32 @@ func getAuthorCommiterString(role string, time time.Time) string {
 		offsetHours,
 		offsetMinutes,
 	)
+}
+
+func GetTreeHashFromCommit(commitHash, gitDir string) (string, error) {
+	objFile, err := common.GetFileFromHash(gitDir, commitHash)
+	if err != nil {
+		return "", fmt.Errorf("GetTreeHashFromCommit: get file from hash: %w", err)
+	}
+	content, objType, err := common.ReadObjectFile(objFile)
+	if err != nil {
+		return "", fmt.Errorf("GetTreeHashFromCommit: read object file: %w", err)
+	}
+	if objType != "commit" {
+		return "", fmt.Errorf("GetTreeHashFromCommit: expected commit, got %s", objType)
+	}
+	// Commit object content is like:
+	// tree <tree-hash>
+	// parent <parent-hash>
+	// author ...
+	// committer ...
+	// <blank line>
+	// Commit message
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "tree ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "tree ")), nil
+		}
+	}
+	return "", fmt.Errorf("tree hash not found in commit object")
 }

@@ -76,3 +76,16 @@ func ReadCompressed(r io.Reader) ([]byte, error) {
 	}
 	return decompressedContent, nil
 }
+
+func modeFromGit(gitMode string) os.FileMode {
+	switch gitMode {
+	case "100644":
+		return 0644
+	case "100755":
+		return 0755
+	case "40000":
+		return os.ModeDir | 0755
+	default:
+		return 0644 // fallback
+	}
+}
