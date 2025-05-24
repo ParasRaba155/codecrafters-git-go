@@ -32,12 +32,12 @@ func initCMD() error {
 
 // catFileCmd has the logic for the cat-file subcommand
 func catFileCmd(hash string) error {
-	file, err := GetFileFromHash(hash)
+	file, err := common.GetFileFromHash(".", hash)
 	if err != nil {
 		return fmt.Errorf("cat File command: get file from hash: %w", err)
 	}
 	defer file.Close()
-	content, objectType, err := ReadObjectFile(file)
+	content, objectType, err := common.ReadObjectFile(file)
 	if err != nil {
 		return fmt.Errorf("error in reading the object file: %s", err)
 	}
@@ -59,16 +59,16 @@ func hashObjectCmd(fileName string) error {
 	if err != nil {
 		return fmt.Errorf("error in reading the given file: %w", err)
 	}
-	contentToWrite := FormatGitObjectContent("blob", fileContent)
-	fileSHA, err := CalculateSHA(contentToWrite)
+	contentToWrite := common.FormatGitObjectContent("blob", fileContent)
+	fileSHA, err := common.CalculateEncodedSHA(contentToWrite)
 	if err != nil {
 		return fmt.Errorf("error in calculating the SHA: %w", err)
 	}
-	nFile, err := CreateEmptyObjectFile(fileSHA)
+	nFile, err := common.CreateEmptyObjectFile(".", fileSHA)
 	if err != nil {
 		return fmt.Errorf("error in creating the object file: %w", err)
 	}
-	err = WriteCompactContent(nFile, bytes.NewReader(contentToWrite))
+	err = common.WriteCompactContent(nFile, bytes.NewReader(contentToWrite))
 	if err != nil {
 		return fmt.Errorf("error in writing to the object file: %w", err)
 	}
@@ -77,12 +77,12 @@ func hashObjectCmd(fileName string) error {
 }
 
 func lsTreeCmd(hash string) error {
-	file, err := GetFileFromHash(hash)
+	file, err := common.GetFileFromHash(".", hash)
 	if err != nil {
 		return fmt.Errorf("ls tree command: get file from hash: %w", err)
 	}
 	defer file.Close()
-	content, objectType, err := ReadObjectFile(file)
+	content, objectType, err := common.ReadObjectFile(file)
 	if err != nil {
 		return fmt.Errorf("error in reading the object file: %w", err)
 	}
@@ -119,16 +119,16 @@ func commitTreeCmd(treeSHA, commitSHA, commitMsg string) error {
 	if err != nil {
 		return fmt.Errorf("write commit file: %w", err)
 	}
-	fullContent := FormatGitObjectContent("commit", content)
-	fullContentSHA, err := CalculateSHA(fullContent)
+	fullContent := common.FormatGitObjectContent("commit", content)
+	fullContentSHA, err := common.CalculateEncodedSHA(fullContent)
 	if err != nil {
 		return fmt.Errorf("calculate full content sha: %w", err)
 	}
-	file, err := CreateEmptyObjectFile(fullContentSHA)
+	file, err := common.CreateEmptyObjectFile(".", fullContentSHA)
 	if err != nil {
 		return fmt.Errorf("create empty object file: %w", err)
 	}
-	err = WriteCompactContent(file, bytes.NewReader(fullContent))
+	err = common.WriteCompactContent(file, bytes.NewReader(fullContent))
 	if err != nil {
 		return fmt.Errorf("write object file: %s", err)
 	}
@@ -137,7 +137,7 @@ func commitTreeCmd(treeSHA, commitSHA, commitMsg string) error {
 }
 
 func cloneCmd(repoLink, dirToCloneAt string) error {
-	err := os.MkdirAll(dirToCloneAt, 0755) // 2147483648
+	err := os.MkdirAll(dirToCloneAt, 0755)
 
 	if err != nil && !os.IsExist(err) {
 		return fmt.Errorf("create the dir to clone the repo: %w", err)
