@@ -309,3 +309,83 @@ func GetTreeHashFromCommit(commitHash, gitDir string) (string, error) {
 	}
 	return "", fmt.Errorf("tree hash not found in commit object")
 }
+
+// RenderTree reconstructs the working directory structure from a Git tree object.
+//
+// Given the SHA-1 hash of a Git tree object, this function recursively traverses
+// the tree and writes its contents (files and subdirectories) into the specified
+// working directory. It is used during the process of `git clone` to check out
+// the repository's files from the Git object database.
+//
+// Parameters:
+//   - hash: The SHA-1 hash (in hexadecimal) of the Git tree object to render.
+//   - workingDir: The target directory path where the files and folders should be created.
+//   - repoRoot: The root directory of the Git repository (i.e., where `.git` resides).
+//
+// Behavior:
+//   - For each entry in the tree:
+//   - If it is a directory (mode "40000"), it creates the directory and recursively calls RenderTree.
+//   - If it is a file (mode "100644" for normal files or "100755" for executables), it reads the blob
+//     object from the Git object store and writes it to the appropriate path with the correct permissions.
+//   - If the object referenced by the hash is not a tree object, or if any read/write operation fails,
+//     it returns an appropriate error.
+//
+// Errors:
+//   - Returns detailed error messages on failure, wrapping underlying errors with context.
+//
+// Example use-case:
+//
+//	This function is typically invoked after unpacking Git objects during a clone operation
+//	to populate the working directory with the initial checkout.
+func RenderTree(hash, workingDir, repoRoot string) error {
+	objFile, err := common.GetFileFromHash(repoRoot, hash)
+	if err != nil {
+		return fmt.Errorf("RenderTree: get file from hash: %w", err)
+	}
+	fileContent, objType, err := common.ReadObjectFile(objFile)
+	if err != nil {
+		return fmt.Errorf("RenderTree: read the object file: %w", err)
+	}
+	if objType != "tree" {
+		return fmt.Errorf("RenderTree: got the object type %q for render Tree", objType)
+	}
+	treeEntry, err := ParseTreeObjectBody(fileContent)
+	if err != nil {
+		return fmt.Errorf("RenderTree: could not parse tree: %w", err)
+	}
+	for _, entry := range treeEntry {
+		entryPath := filepath.Join(workingDir, entry.Name)
+		shaHex := hex.EncodeToString(entry.SHA[:])
+
+		switch entry.GitMode {
+		case "40000":
+			err := os.MkdirAll(entryPath, 0755)
+			if err != nil {
+				return fmt.Errorf("RenderTree: mkdir %s: %w", entryPath, err)
+			}
+			err = RenderTree(shaHex, entryPath, repoRoot)
+			if err != nil {
+				return err
+			}
+		case "100644", "100755":
+			objFile, err := common.GetFileFromHash(repoRoot, shaHex)
+			if err != nil {
+				return fmt.Errorf("RenderTree: get file for blob %s: %w", shaHex, err)
+			}
+			content, objType, err := common.ReadObjectFile(objFile)
+			if err != nil {
+				return fmt.Errorf("RenderTree: read blob file: %w", err)
+			}
+			if objType != "blob" {
+				return fmt.Errorf("RenderTree: expected blob, got %s", objType)
+			}
+			err = os.WriteFile(entryPath, content, entry.Mode)
+			if err != nil {
+				return fmt.Errorf("RenderTree: writing blob to file %s: %w", entryPath, err)
+			}
+		default:
+			return fmt.Errorf("RenderTree: unsupported Git mode %q for entry %q", entry.GitMode, entry.Name)
+		}
+	}
+	return nil
+}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/codecrafters-io/git-starter-go/cmd/clone"
@@ -183,62 +182,9 @@ func cloneCmd(repoLink, dirToCloneAt string) error {
 	if err != nil {
 		return err
 	}
-	err = renderTree(treeSHA, ".", ".")
+	err = RenderTree(treeSHA, ".", ".")
 	if err != nil {
 		return err
-	}
-	return nil
-}
-
-func renderTree(hash, workingDir, repoRoot string) error {
-	objFile, err := common.GetFileFromHash(repoRoot, hash)
-	if err != nil {
-		return fmt.Errorf("renderTree: get file from hash: %w", err)
-	}
-	fileContent, objType, err := common.ReadObjectFile(objFile)
-	if err != nil {
-		return fmt.Errorf("renderTree: read the object file: %w", err)
-	}
-	if objType != "tree" {
-		return fmt.Errorf("renderTree: got the object type %q for render Tree", objType)
-	}
-	treeEntry, err := ParseTreeObjectBody(fileContent)
-	if err != nil {
-		return fmt.Errorf("renderTree: could not parse tree: %w", err)
-	}
-	for _, entry := range treeEntry {
-		entryPath := filepath.Join(workingDir, entry.Name)
-		shaHex := hex.EncodeToString(entry.SHA[:])
-
-		switch entry.GitMode {
-		case "40000":
-			err := os.MkdirAll(entryPath, 0755)
-			if err != nil {
-				return fmt.Errorf("renderTree: mkdir %s: %w", entryPath, err)
-			}
-			err = renderTree(shaHex, entryPath, repoRoot)
-			if err != nil {
-				return err
-			}
-		case "100644", "100755":
-			objFile, err := common.GetFileFromHash(repoRoot, shaHex)
-			if err != nil {
-				return fmt.Errorf("renderTree: get file for blob %s: %w", shaHex, err)
-			}
-			content, objType, err := common.ReadObjectFile(objFile)
-			if err != nil {
-				return fmt.Errorf("renderTree: read blob file: %w", err)
-			}
-			if objType != "blob" {
-				return fmt.Errorf("renderTree: expected blob, got %s", objType)
-			}
-			err = os.WriteFile(entryPath, content, entry.Mode)
-			if err != nil {
-				return fmt.Errorf("renderTree: writing blob to file %s: %w", entryPath, err)
-			}
-		default:
-			return fmt.Errorf("renderTree: unsupported Git mode %q for entry %q", entry.GitMode, entry.Name)
-		}
 	}
 	return nil
 }
