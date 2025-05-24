@@ -5,10 +5,7 @@ import (
 	"os"
 )
 
-// Usage: your_git.sh <command> <arg1> <arg2> ...
 func main() {
-	// Uncomment this block to pass the first stage!
-	//
 	if len(os.Args) < 2 {
 		ePrintf("usage: mygit <command> [<args>...]\n")
 		os.Exit(1)

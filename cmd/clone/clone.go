@@ -132,7 +132,6 @@ func ReadPackFile(content []byte) ([]GitObject, error) {
 func readPackFileHeader(content []byte) (int, PackHeader, error) {
 	offset, packHeader := 0, PackHeader{}
 	if bytes.Equal(content[offset:offset+8], []byte{'0', '0', '0', '8', 'N', 'A', 'K', '\n'}) {
-		// return offset, packHeader, fmt.Errorf("first 8 bytes must be 0008NAK: %s", content[offset:offset+8])
 		offset += 8
 	}
 
@@ -184,13 +183,7 @@ func readPackFileBody(content []byte, numOfObj int) ([]GitObject, error) {
 		currentObj.ObjectType, currentObj.Size, currentObj.Content = objType, len(decompressed), decompressed
 		objects[i] = currentObj
 
-		// fmt.Printf(
-		// 	"%03d object type = %s, declared length = %d, headerBytesRead  = %d, compressed bytes = %d, decompressed bytes = %d used = %d\n",
-		// 	i, objType, length, headerBytesRead, len(compressed), len(decompressed), used,
-		// )
-
 		offset += used
-		// fmt.Printf("offset: %d\n", offset)
 		if offset > len(content) {
 			return nil, fmt.Errorf("offset %d exceeded content length %d after object %d", offset, len(content), i)
 		}
@@ -387,7 +380,6 @@ func WriteObjects(dir string, objects []GitObject) error {
 	for i, obj := range deltas {
 		// Second pass: Resolve and write REF_DELTA objects
 		if err := writeDeltaObject(dir, obj); err != nil {
-			// fmt.Printf("WriteObjects pass2 delta [%d]:%+v %s\n", i, obj, err)
 			return fmt.Errorf("WriteObjects pass2 delta [%d]:%+v %w", i, obj, err)
 		}
 	}
