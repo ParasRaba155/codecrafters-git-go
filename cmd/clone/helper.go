@@ -18,7 +18,9 @@ func readBigEndian(b [4]byte) uint32 {
 // object sizes in [git documentation](https://git-scm.com/docs/gitformat-pack)
 //
 // NOTE: it is expected that the content provided will be the body of the pack file
-func packObjectSize(content []byte) (length uint64, objType GitObjectType, bytesRead int, err error) {
+func packObjectSize(
+	content []byte,
+) (length uint64, objType GitObjectType, bytesRead int, err error) {
 	if len(content) == 0 {
 		return 0, 0, 0, fmt.Errorf("%w: no content", errInvalidSize)
 	}
@@ -58,7 +60,8 @@ func findAndDecompress(data []byte) (compressed []byte, decompressed []byte, use
 	// NOTE: we specifically use the bytes.NewReader because it implements
 	// [io.ByteReader](https://pkg.go.dev/io#ByteReader)
 	// which will ensure that only the compressed data is read
-	// We could also go with [bytes.NewBuffer](https://pkg.go.dev/bytes#NewBuffer) as [bytes.Buffer](https://pkg.go.dev/bytes#Buffer)
+	// We could also go with [bytes.NewBuffer](https://pkg.go.dev/bytes#NewBuffer) as
+	// [bytes.Buffer](https://pkg.go.dev/bytes#Buffer)
 	// also implements the [io.ByteReader](https://pkg.go.dev/io#ByteReader)
 	reader := bytes.NewReader(data)
 	zlibReader, err := zlib.NewReader(reader)

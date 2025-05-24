@@ -78,7 +78,11 @@ func GetRefList(input []byte) ([]GitRef, error) {
 
 func RefDiscovery(repoLink string, refs []GitRef) ([]byte, error) {
 	fullURL := fmt.Sprintf("%s/git-upload-pack", repoLink)
-	request, err := http.NewRequest("POST", fullURL, bytes.NewReader(generateRefDiscoveryRequest(refs)))
+	request, err := http.NewRequest(
+		"POST",
+		fullURL,
+		bytes.NewReader(generateRefDiscoveryRequest(refs)),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +92,10 @@ func RefDiscovery(repoLink string, refs []GitRef) ([]byte, error) {
 		return nil, fmt.Errorf("RefDiscovery Client Do: %w", err)
 	}
 	if response.StatusCode != 200 {
-		return nil, fmt.Errorf("RefDiscovery client response invalid status code: %s", response.Status)
+		return nil, fmt.Errorf(
+			"RefDiscovery client response invalid status code: %s",
+			response.Status,
+		)
 	}
 	defer response.Body.Close()
 	content, err := io.ReadAll(response.Body)
@@ -136,7 +143,10 @@ func readPackFileHeader(content []byte) (int, PackHeader, error) {
 	}
 
 	if !bytes.Equal(content[offset:offset+4], []byte{'P', 'A', 'C', 'K'}) {
-		return offset, packHeader, fmt.Errorf("first 4 bytes must be PACK: %s", content[offset:offset+4])
+		return offset, packHeader, fmt.Errorf(
+			"first 4 bytes must be PACK: %s",
+			content[offset:offset+4],
+		)
 	}
 	offset += 4
 
@@ -180,12 +190,19 @@ func readPackFileBody(content []byte, numOfObj int) ([]GitObject, error) {
 			return nil, fmt.Errorf("decompressing object %d: %w", i, err)
 		}
 
-		currentObj.ObjectType, currentObj.Size, currentObj.Content = objType, len(decompressed), decompressed
+		currentObj.ObjectType, currentObj.Size, currentObj.Content = objType, len(
+			decompressed,
+		), decompressed
 		objects[i] = currentObj
 
 		offset += used
 		if offset > len(content) {
-			return nil, fmt.Errorf("offset %d exceeded content length %d after object %d", offset, len(content), i)
+			return nil, fmt.Errorf(
+				"offset %d exceeded content length %d after object %d",
+				offset,
+				len(content),
+				i,
+			)
 		}
 	}
 	return objects, nil
@@ -236,7 +253,11 @@ func applyDelta(baseContent, deltaInstructions []byte) ([]byte, error) {
 	}
 
 	if baseSizeFromDelta != len(baseContent) {
-		return nil, fmt.Errorf("base object size mismatch: delta expects %d bytes, actual base is %d bytes", baseSizeFromDelta, len(baseContent))
+		return nil, fmt.Errorf(
+			"base object size mismatch: delta expects %d bytes, actual base is %d bytes",
+			baseSizeFromDelta,
+			len(baseContent),
+		)
 	}
 
 	resultSize, deltaOffset, err := readVarInt(deltaInstructions, deltaOffset)
@@ -253,20 +274,30 @@ func applyDelta(baseContent, deltaInstructions []byte) ([]byte, error) {
 		if (commandByte & 0x80) == 0 { // MSB is 0: Add literal data
 			length := int(commandByte & 0x7f)
 			if length == 0 { // Special case for length encoded in subsequent bytes
-				// This is a simplified handler. A full implementation would read a varint for length here.
-				// For now, if you encounter this, it means the delta is more complex than this simplified parser handles.
-				// Git uses a single byte for small literal lengths (0-127). For lengths > 127, it encodes them
+				// This is a simplified handler. A full implementation would read a varint for
+				// length here. For now, if you encounter this, it means the delta is more complex
+				// than this simplified parser handles. Git uses a single byte for small literal
+				// lengths (0-127). For lengths > 127, it encodes them
 				// as a varint where the first byte is 0, and the actual length follows as a varint.
 				// This would involve another call to readVarInt here.
-				// For many common deltas, this case might not be hit, but it's important for full compliance.
-				return nil, fmt.Errorf("unsupported literal data length encoding (command byte 0x00). A varint for length is expected here.")
+				// For many common deltas, this case might not be hit, but it's important for full
+				// compliance.
+				return nil, fmt.Errorf(
+					"unsupported literal data length encoding (command byte 0x00). A varint for length is expected here.",
+				)
 			}
 
 			if deltaOffset+length > len(deltaInstructions) {
-				return nil, fmt.Errorf("delta instructions truncated: literal data length %d exceeds remaining delta bytes at offset %d", length, deltaOffset-1)
+				return nil, fmt.Errorf(
+					"delta instructions truncated: literal data length %d exceeds remaining delta bytes at offset %d",
+					length,
+					deltaOffset-1,
+				)
 			}
 
-			resultBuffer = append(resultBuffer, deltaInstructions[deltaOffset:deltaOffset+length]...)
+			resultBuffer = append(
+				resultBuffer,
+				deltaInstructions[deltaOffset:deltaOffset+length]...)
 			deltaOffset += length
 
 		} else { // MSB is 1: Copy from base command
@@ -275,7 +306,8 @@ func applyDelta(baseContent, deltaInstructions []byte) ([]byte, error) {
 
 			// Read bytes for the offset
 			// Bits 0-3 of the command byte determine how many bytes contribute to the offset.
-			// Each bit, if set, means the next byte in the delta instructions contributes to the offset.
+			// Each bit, if set, means the next byte in the delta instructions contributes to the
+			// offset.
 			// The bytes are read in little-endian order.
 			if (commandByte & 0x01) != 0 { // Bit 0
 				if deltaOffset >= len(deltaInstructions) {
@@ -356,7 +388,11 @@ func applyDelta(baseContent, deltaInstructions []byte) ([]byte, error) {
 	}
 
 	if len(resultBuffer) != resultSize {
-		return nil, fmt.Errorf("resolved content size mismatch: expected %d bytes, actual %d bytes", resultSize, len(resultBuffer))
+		return nil, fmt.Errorf(
+			"resolved content size mismatch: expected %d bytes, actual %d bytes",
+			resultSize,
+			len(resultBuffer),
+		)
 	}
 
 	return resultBuffer, nil

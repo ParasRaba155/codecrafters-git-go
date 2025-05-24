@@ -221,7 +221,10 @@ func bufferToFile(buffer *bytes.Buffer) ([20]byte, error) {
 		return [20]byte{}, fmt.Errorf("couldn't create tree object file: %w", err)
 	}
 	defer treeFile.Close()
-	err = common.WriteCompactContent(treeFile, bytes.NewReader(common.FormatGitObjectContent("tree", treeContent)))
+	err = common.WriteCompactContent(
+		treeFile,
+		bytes.NewReader(common.FormatGitObjectContent("tree", treeContent)),
+	)
 	if err != nil {
 		return [20]byte{}, err
 	}
@@ -324,11 +327,14 @@ func GetTreeHashFromCommit(commitHash, gitDir string) (string, error) {
 //
 // Behavior:
 //   - For each entry in the tree:
-//   - If it is a directory (mode "40000"), it creates the directory and recursively calls RenderTree.
-//   - If it is a file (mode "100644" for normal files or "100755" for executables), it reads the blob
-//     object from the Git object store and writes it to the appropriate path with the correct permissions.
-//   - If the object referenced by the hash is not a tree object, or if any read/write operation fails,
-//     it returns an appropriate error.
+//
+// - If it is a directory (mode "40000"), it creates the directory and recursively calls RenderTree.
+// - If it is a file (mode "100644" for normal files or "100755" for executables), it reads the blob
+// object from the Git object store and writes it to the appropriate path with the correct
+// permissions. - If the object referenced by the hash is not a tree object, or if any read/write
+// operation fails,
+//
+//	it returns an appropriate error.
 //
 // Errors:
 //   - Returns detailed error messages on failure, wrapping underlying errors with context.
@@ -384,7 +390,11 @@ func RenderTree(hash, workingDir, repoRoot string) error {
 				return fmt.Errorf("RenderTree: writing blob to file %s: %w", entryPath, err)
 			}
 		default:
-			return fmt.Errorf("RenderTree: unsupported Git mode %q for entry %q", entry.GitMode, entry.Name)
+			return fmt.Errorf(
+				"RenderTree: unsupported Git mode %q for entry %q",
+				entry.GitMode,
+				entry.Name,
+			)
 		}
 	}
 	return nil
