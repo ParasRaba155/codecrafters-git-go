@@ -33,19 +33,33 @@ func (o GitObjectType) String() string {
 	}
 }
 
-type GitObject struct {
-	ObjectType GitObjectType
-	Size       int
-	Content    []byte
+// StringToObjectType will return OBJ_INVALID  on invalid object
+// It is caller's responsibility to check for that
+func StringToObjectType(str string) GitObjectType {
+	switch str {
+	case "tree":
+		return OBJ_TREE
+	case "blob":
+		return OBJ_BLOB
+	case "commit":
+		return OBJ_COMMIT
+	case "tag":
+		return OBJ_TAG
+	case "ofsdelta":
+		return OBJ_OFS_DELTA
+	case "refdelta":
+		return OBJ_REF_DELTA
+	default:
+		return OBJ_INVALID
+	}
 }
 
-const (
-	VarintEncodingBits  uint8 = 7
-	VarintContinueFlag  uint8 = 1 << VarintEncodingBits
-	TypeBits            uint8 = 3
-	TypeByteSizeBits    uint8 = VarintEncodingBits - TypeBits
-	CopyInstructionFlag uint8 = 1 << 7
-	CopySizeBytes       uint8 = 3
-	CopyZeroSize        int   = 0x10000
-	CopyOffsetBytes     uint8 = 4
-)
+// GitObject when we unpack a pack file we will get a git object type
+type GitObject struct {
+	ObjectType GitObjectType
+	// Size the decompressed size
+	Size    int
+	Content []byte
+	// Base would be hash of the base object in case of DELTA objects
+	Base string
+}

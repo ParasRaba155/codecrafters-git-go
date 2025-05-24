@@ -3,7 +3,6 @@ package clone
 import (
 	"bytes"
 	"compress/zlib"
-	"crypto/sha1"
 	"errors"
 	"fmt"
 	"io"
@@ -81,24 +80,4 @@ func findAndDecompress(data []byte) (compressed []byte, decompressed []byte, use
 	compressed = data[:used]
 
 	return compressed, decompressed, used, nil
-}
-
-func getRawSHA(content []byte) ([20]byte, error) {
-	hasher := sha1.New()
-	n, err := hasher.Write(content)
-	if err != nil {
-		return [20]byte{}, err
-	}
-	if n != len(content) {
-		return [20]byte{}, fmt.Errorf(
-			"mismatch in the bytes written and content: %d and %d",
-			n,
-			len(content),
-		)
-	}
-	res := hasher.Sum(nil)
-	if len(res) != 20 {
-		return [20]byte{}, fmt.Errorf("malformed hash created with '%d' bytes", len(res))
-	}
-	return [20]byte(res), nil
 }

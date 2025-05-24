@@ -164,7 +164,7 @@ func TestReadPackFile(t *testing.T) {
 	if err != nil {
 		t.Errorf("error in reading packfile: %v", err)
 	}
-	err = ReadPackFile(content)
+	_, err = ReadPackFile(content)
 	if err != nil {
 		t.Errorf("error in reading packfile: %v", err)
 	}

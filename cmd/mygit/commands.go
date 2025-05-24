@@ -134,11 +134,17 @@ func commitTreeCmd(treeSHA, commitSHA, commitMsg string) error {
 }
 
 func cloneCmd(repoLink, dirToCloneAt string) error {
-	err := os.Mkdir(dirToCloneAt, os.ModeDir|os.FileMode(0755))
+	err := os.MkdirAll(dirToCloneAt, 0755) // 2147483648
 
 	if err != nil && !os.IsExist(err) {
 		return fmt.Errorf("create the dir to clone the repo: %w", err)
 	}
+	err = os.Chdir(dirToCloneAt)
+	if err != nil {
+		return fmt.Errorf("couldn't change the dir: %w", err)
+	}
+	initCMD()
+
 	gitRefResponse, err := clone.GitSmartProtocolGetRefs(repoLink)
 	if err != nil {
 		return fmt.Errorf("git smart protocol for ref fetching: %w", err)
@@ -152,7 +158,11 @@ func cloneCmd(repoLink, dirToCloneAt string) error {
 	if err != nil {
 		return fmt.Errorf("git smart protocol for ref discovery: %w", err)
 	}
-	err = clone.ReadPackFile(packfileContent)
+	objects, err := clone.ReadPackFile(packfileContent)
+	if err != nil {
+		return err
+	}
+	err = clone.WriteObjects(dirToCloneAt, objects)
 	if err != nil {
 		return err
 	}
