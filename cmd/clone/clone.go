@@ -208,39 +208,32 @@ func readPackFileBody(content []byte, numOfObj int) ([]GitObject, error) {
 	return objects, nil
 }
 
-// readVarInt reads a variable-length integer from a byte slice.
-// It updates the `offset` pointer as it consumes bytes from the `data` slice.
-// This format is used for encoding sizes in Git delta instructions.
-func readVarInt(data []byte, deltaOffset int) (size int, offset int, err error) {
-	result := 0
-	shift := 0
+// readVarInt is reading the size of data in the same way as we did in `packObjectSize`. The
+// difference here is that in `packObjectSize` first byte also contains the information about object
+// type whereas here we directly read the 7 bytes as size bytes and MSB as way to continue or not
+func readVarInt(data []byte, offset int) (size int, newOffset int, err error) {
+	result, shift := 0, 0
 	for {
-		// Ensure we don't read beyond the end of the data slice.
-		if deltaOffset >= len(data) {
+		if offset >= len(data) {
 			return 0, 0, fmt.Errorf("unexpected end of data while reading variable-length integer")
 		}
-		b := data[deltaOffset] // Get the current byte.
-		deltaOffset++          // Move the offset to the next byte.
+		b := data[offset]
+		offset++
 
-		// Accumulate the lower 7 bits of the byte into the result.
-		// Each subsequent byte shifts its bits by an additional 7.
+		// 0x7f -> 0b01111111
+		// 0x80 -> 0b10000000
 		result |= (int(b) & 0x7f) << shift
-
-		// If the Most Significant Bit (MSB) is 0, this is the last byte of the varint.
 		if (b & 0x80) == 0 {
-			break // Exit the loop as the varint is fully read.
+			break
 		}
 
-		// If MSB is 1, there's another byte to read. Increase the shift for the next byte.
 		shift += 7
 
-		// Prevent potential overflow for extremely large (and unlikely) varints,
-		// or malformed data that could lead to an infinite loop if MSB is always 1.
-		if shift >= 63 { // Max bits for int is usually 63 for 64-bit systems.
+		if shift >= 63 {
 			return 0, 0, fmt.Errorf("variable-length integer too large or malformed")
 		}
 	}
-	return result, deltaOffset, nil
+	return result, offset, nil
 }
 
 // Applies the delta to a base object and returns the final object bytes.
@@ -260,22 +253,35 @@ func applyDelta(baseContent, deltaInstructions []byte) ([]byte, error) {
 		)
 	}
 
-	resultSize, deltaOffset, err := readVarInt(deltaInstructions, deltaOffset)
+	size, deltaOffset, err := readVarInt(deltaInstructions, deltaOffset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read result object size from delta: %w", err)
 	}
 
-	resultBuffer := make([]byte, 0, resultSize)
+	result := make([]byte, 0, size)
 
 	for deltaOffset < len(deltaInstructions) {
 		commandByte := deltaInstructions[deltaOffset]
 		deltaOffset++
 
-		if (commandByte & 0x80) == 0 { // MSB is 0: Add literal data
+		// 0x80 -> 0b10000000
+		// 0x7f -> 0b01111111
+		// 0x01 -> 0b00000001
+		// 0x02 -> 0b00000010
+		// 0x04 -> 0b00000100
+		// 0x08 -> 0b00001000
+		// 0x10 -> 0b00010000
+		// 0x20 -> 0b00100000
+		// 0x40 -> 0b01000000
+		// 0x10000 -> 0b00010000000000000000 (65536)
+
+		// MSB is 0: Add literal data
+		if (commandByte & 0x80) == 0 {
 			length := int(commandByte & 0x7f)
-			if length == 0 { // Special case for length encoded in subsequent bytes
+			if length == 0 {
+				// Special case for length encoded in subsequent bytes
 				// This is a simplified handler. A full implementation would read a varint for
-				// length here. For now, if you encounter this, it means the delta is more complex
+				// length here. For now, if we encounter this, it means the delta is more complex
 				// than this simplified parser handles. Git uses a single byte for small literal
 				// lengths (0-127). For lengths > 127, it encodes them
 				// as a varint where the first byte is 0, and the actual length follows as a varint.
@@ -283,7 +289,7 @@ func applyDelta(baseContent, deltaInstructions []byte) ([]byte, error) {
 				// For many common deltas, this case might not be hit, but it's important for full
 				// compliance.
 				return nil, fmt.Errorf(
-					"unsupported literal data length encoding (command byte 0x00). A varint for length is expected here.",
+					"unsupported literal data length encoding (command byte 0x00). A varint for length is expected here",
 				)
 			}
 
@@ -295,107 +301,80 @@ func applyDelta(baseContent, deltaInstructions []byte) ([]byte, error) {
 				)
 			}
 
-			resultBuffer = append(
-				resultBuffer,
-				deltaInstructions[deltaOffset:deltaOffset+length]...)
+			result = append(
+				result,
+				deltaInstructions[deltaOffset:deltaOffset+length]...,
+			)
 			deltaOffset += length
-
-		} else { // MSB is 1: Copy from base command
-			offset := 0
-			size := 0x10000 // Default size if no size bits are set
-
-			// Read bytes for the offset
-			// Bits 0-3 of the command byte determine how many bytes contribute to the offset.
-			// Each bit, if set, means the next byte in the delta instructions contributes to the
-			// offset.
-			// The bytes are read in little-endian order.
-			if (commandByte & 0x01) != 0 { // Bit 0
-				if deltaOffset >= len(deltaInstructions) {
-					return nil, fmt.Errorf("delta instructions truncated while reading offset byte 1")
-				}
-				offset |= int(deltaInstructions[deltaOffset]) << 0
-				deltaOffset++
-			}
-			if (commandByte & 0x02) != 0 { // Bit 1
-				if deltaOffset >= len(deltaInstructions) {
-					return nil, fmt.Errorf("delta instructions truncated while reading offset byte 2")
-				}
-				offset |= int(deltaInstructions[deltaOffset]) << 8
-				deltaOffset++
-			}
-			if (commandByte & 0x04) != 0 { // Bit 2
-				if deltaOffset >= len(deltaInstructions) {
-					return nil, fmt.Errorf("delta instructions truncated while reading offset byte 3")
-				}
-				offset |= int(deltaInstructions[deltaOffset]) << 16
-				deltaOffset++
-			}
-			if (commandByte & 0x08) != 0 { // Bit 3
-				if deltaOffset >= len(deltaInstructions) {
-					return nil, fmt.Errorf("delta instructions truncated while reading offset byte 4")
-				}
-				offset |= int(deltaInstructions[deltaOffset]) << 24
-				deltaOffset++
-			}
-
-			// Read bytes for the size
-			// Bits 4-6 of the command byte determine how many bytes contribute to the size.
-			// If none are set, the size defaults to 0x10000.
-			// The bytes are read in little-endian order.
-			// IMPORTANT: If a size byte is read, it *initializes* `size`,
-			// otherwise the default `0x10000` is used.
-			sizeBytesRead := 0
-			if (commandByte & 0x10) != 0 { // Bit 4
-				if deltaOffset >= len(deltaInstructions) {
-					return nil, fmt.Errorf("delta instructions truncated while reading size byte 1")
-				}
-				size = int(deltaInstructions[deltaOffset]) << 0 // Initialize size with this byte
-				deltaOffset++
-				sizeBytesRead++
-			}
-			if (commandByte & 0x20) != 0 { // Bit 5
-				if deltaOffset >= len(deltaInstructions) {
-					return nil, fmt.Errorf("delta instructions truncated while reading size byte 2")
-				}
-				if sizeBytesRead == 0 { // If this is the first size byte read, initialize size
-					size = int(deltaInstructions[deltaOffset]) << 8
-				} else { // Otherwise, OR with the shifted byte
-					size |= int(deltaInstructions[deltaOffset]) << 8
-				}
-				deltaOffset++
-				sizeBytesRead++
-			}
-			if (commandByte & 0x40) != 0 { // Bit 6
-				if deltaOffset >= len(deltaInstructions) {
-					return nil, fmt.Errorf("delta instructions truncated while reading size byte 3")
-				}
-				if sizeBytesRead == 0 { // If this is the first size byte read, initialize size
-					size = int(deltaInstructions[deltaOffset]) << 16
-				} else { // Otherwise, OR with the shifted byte
-					size |= int(deltaInstructions[deltaOffset]) << 16
-				}
-				deltaOffset++
-				sizeBytesRead++
-			}
-
-			// Validate that the copy operation is within the bounds of the base content.
-			if offset < 0 || size < 0 || offset+size > len(baseContent) {
-				return nil, fmt.Errorf("copy command out of bounds: offset %d, size %d, base content length %d", offset, size, len(baseContent))
-			}
-
-			resultBuffer = append(resultBuffer, baseContent[offset:offset+size]...)
+			continue
 		}
+		// MSB is 1: Copy from base command
+		offset := 0
+		size := 0x10000 // Default size if no size bits are set
+
+		// Read bytes for the offset
+		// Bits 0-3 of the command byte determine how many bytes contribute to the offset.
+		// Each bit, if set, means the next byte in the delta instructions contributes to the
+		// offset.
+		// The bytes are read in little-endian order.
+		lowerBits := [...]byte{0x01, 0x02, 0x04, 0x08}
+		for i, bit := range lowerBits {
+			if (commandByte & bit) == 0 {
+				continue
+			}
+			if deltaOffset >= len(deltaInstructions) {
+				return nil, fmt.Errorf("delta instructions truncated while reading offset byte %d", i+1)
+			}
+			offset |= int(deltaInstructions[deltaOffset]) << (8 * i)
+			deltaOffset++
+		}
+
+		// Read bytes for the size
+		// Bits 4-6 of the command byte determine how many bytes contribute to the size.
+		// If none are set, the size defaults to 0x10000.
+		// The bytes are read in little-endian order.
+		// IMPORTANT: If a size byte is read, it *initializes* `size`,
+		// otherwise the default `0x10000` is used.
+		sizeBytesRead := 0
+		higherBits := [...]byte{0x10, 0x20, 0x40}
+		for i, bit := range higherBits {
+			if (commandByte & bit) == 0 {
+				continue
+			}
+			if deltaOffset >= len(deltaInstructions) {
+				return nil, fmt.Errorf("delta instructions truncated while reading size byte %d", i+1)
+			}
+			// if it's the first byte read then initialize size
+			if i == 0 || sizeBytesRead == 0 {
+				size = int(deltaInstructions[deltaOffset]) << (8 * i)
+				deltaOffset++
+				sizeBytesRead++
+				continue
+			}
+			// Otherwise OR it
+			size |= int(deltaInstructions[deltaOffset]) << (8 * i)
+
+			deltaOffset++
+			sizeBytesRead++
+		}
+
+		// Validate that the copy operation is within the bounds of the base content.
+		if offset < 0 || size < 0 || offset+size > len(baseContent) {
+			return nil, fmt.Errorf("copy command out of bounds: offset %d, size %d, base content length %d", offset, size, len(baseContent))
+		}
+
+		result = append(result, baseContent[offset:offset+size]...)
 	}
 
-	if len(resultBuffer) != resultSize {
+	if len(result) != size {
 		return nil, fmt.Errorf(
 			"resolved content size mismatch: expected %d bytes, actual %d bytes",
-			resultSize,
-			len(resultBuffer),
+			size,
+			len(result),
 		)
 	}
 
-	return resultBuffer, nil
+	return result, nil
 }
 
 func WriteObjects(dir string, objects []GitObject) error {
